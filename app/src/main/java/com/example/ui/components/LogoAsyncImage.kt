@@ -3,6 +3,10 @@ package com.example.ui.components
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import androidx.compose.runtime.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -46,7 +50,7 @@ fun LogoAsyncImage(
                         applyWhiteFilter = logoFilterCache[logoUrl]!!
                         return@listener
                     }
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                    CoroutineScope(Dispatchers.Default).launch {
                         try {
                             val drawable = result.drawable
                             val bitmap = (drawable as? BitmapDrawable)?.bitmap ?: run {
@@ -61,45 +65,55 @@ fun LogoAsyncImage(
                                 bmp
                             }
 
-                            var totalVisible = 0
-                            var darkMonochromeCount = 0
+                            val w = bitmap.width
+                            val h = bitmap.height
+                            if (w > 0 && h > 0) {
+                                val pixels = IntArray(w * h)
+                                bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
 
-                            val stepX = (bitmap.width / 20).coerceIn(1, 10)
-                            val stepY = (bitmap.height / 20).coerceIn(1, 10)
+                                var totalVisible = 0
+                                var darkMonochromeCount = 0
 
-                            for (x in 0 until bitmap.width step stepX) {
-                                for (y in 0 until bitmap.height step stepY) {
-                                    val pixel = bitmap.getPixel(x, y)
-                                    val alpha = android.graphics.Color.alpha(pixel)
-                                    if (alpha > 40) {
-                                        val r = android.graphics.Color.red(pixel)
-                                        val g = android.graphics.Color.green(pixel)
-                                        val b = android.graphics.Color.blue(pixel)
+                                val stepX = (w / 20).coerceAtLeast(1)
+                                val stepY = (h / 20).coerceAtLeast(1)
 
-                                        val maxChannel = maxOf(r, g, b)
-                                        val minChannel = minOf(r, g, b)
-                                        val colorDiff = maxChannel - minChannel
+                                for (y in 0 until h step stepY) {
+                                    val rowOffset = y * w
+                                    for (x in 0 until w step stepX) {
+                                        val pixel = pixels[rowOffset + x]
+                                        val alpha = (pixel ushr 24) and 0xFF
+                                        if (alpha > 40) {
+                                            val r = (pixel ushr 16) and 0xFF
+                                            val g = (pixel ushr 8) and 0xFF
+                                            val b = pixel and 0xFF
 
-                                        totalVisible++
+                                            val maxChannel = maxOf(r, g, b)
+                                            val minChannel = minOf(r, g, b)
+                                            val colorDiff = maxChannel - minChannel
 
-                                        if (maxChannel < 85 && colorDiff < 35) {
-                                            darkMonochromeCount++
+                                            totalVisible++
+
+                                            if (maxChannel < 85 && colorDiff < 35) {
+                                                darkMonochromeCount++
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            val isDark = if (totalVisible >= 10) {
-                                val darkRatio = darkMonochromeCount.toFloat() / totalVisible
-                                darkRatio >= 0.85f
-                            } else false
+                                val isDark = if (totalVisible >= 10) {
+                                    val darkRatio = darkMonochromeCount.toFloat() / totalVisible
+                                    darkRatio >= 0.85f
+                                } else false
 
-                            logoFilterCache[logoUrl] = isDark
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                applyWhiteFilter = isDark
+                                logoFilterCache[logoUrl] = isDark
+                                withContext(Dispatchers.Main) {
+                                    applyWhiteFilter = isDark
+                                }
                             }
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            // Coroutine cancelled during screen navigation, ignore
                         } catch (e: Exception) {
-                            android.util.Log.e("LogoAsyncImage", "Error inspecting logo bitmap", e)
+                            android.util.Log.w("LogoAsyncImage", "Error inspecting logo bitmap: ${e.message}")
                         }
                     }
                 }

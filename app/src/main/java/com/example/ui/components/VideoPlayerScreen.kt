@@ -5,8 +5,11 @@ import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -78,6 +82,19 @@ fun VideoPlayerScreen(
     val audioButtonFocusRequester = remember { FocusRequester() }
     val subtitleButtonFocusRequester = remember { FocusRequester() }
     val outrosButtonFocusRequester = remember { FocusRequester() }
+    val backButtonFocusRequester = remember { FocusRequester() }
+    val nextEpFocusRequester = remember { FocusRequester() }
+    val playButtonFocusRequester = remember { FocusRequester() }
+
+    var isBackFocused by remember { mutableStateOf(false) }
+    var isOpcoesFocused by remember { mutableStateOf(false) }
+    var isNextEpFocused by remember { mutableStateOf(false) }
+    var isPlayFocused by remember { mutableStateOf(false) }
+    var isAudioFocused by remember { mutableStateOf(false) }
+    var isSubtitleFocused by remember { mutableStateOf(false) }
+    var isOutrosFocused by remember { mutableStateOf(false) }
+
+    val isAnyControlFocused = isBackFocused || isOpcoesFocused || isNextEpFocused || isPlayFocused || isAudioFocused || isSubtitleFocused || isOutrosFocused
 
     // Overlay State (Show/Hide Controls)
     var showControls by remember { mutableStateOf(true) }
@@ -147,7 +164,7 @@ fun VideoPlayerScreen(
         val pos = vlcPlayerManager.currentPosition
         val dur = vlcPlayerManager.duration
         if ((item.type == "movie" || item.type == "series") && dur > 0 && pos > 0) {
-            viewModel.saveWatchProgress(item.id, pos, dur)
+            viewModel.saveWatchProgress(item, pos, dur)
         }
         onBack()
     }
@@ -180,7 +197,7 @@ fun VideoPlayerScreen(
         }
 
         android.util.Log.d("VideoPlayerScreen", "Preparing playUrl for item: ${item.title}, type: ${item.type}, url: $initialUrl")
-        val progress = viewModel.getWatchProgress(item.id)
+        val progress = viewModel.getWatchProgress(item)
         if (progress != null && progress.position > 2000L) { // Only prompt if watched more than 2 seconds
             savedProgress = progress
             showResumeDialog = true
@@ -200,7 +217,7 @@ fun VideoPlayerScreen(
                 val pos = vlcPlayerManager.currentPosition
                 val dur = vlcPlayerManager.duration
                 if (dur > 0 && pos > 0) {
-                    viewModel.saveWatchProgress(item.id, pos, dur)
+                    viewModel.saveWatchProgress(item, pos, dur)
                 }
             }
         }
@@ -226,7 +243,7 @@ fun VideoPlayerScreen(
             val pos = vlcPlayerManager.currentPosition
             val dur = vlcPlayerManager.duration
             if ((item.type == "movie" || item.type == "series") && dur > 0 && pos > 0) {
-                viewModel.saveWatchProgress(item.id, pos, dur)
+                viewModel.saveWatchProgress(item, pos, dur)
             }
             vlcPlayerManager.release()
         }
@@ -264,40 +281,67 @@ fun VideoPlayerScreen(
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { keyEvent ->
-                if (showResumeDialog) {
-                    // Let the resume dialog handle its own focus navigation and key events
+                if (showResumeDialog || showOptionsDialog || showAudioDialog || showSubtitleDialog || showOutrosDialog) {
                     false
                 } else if (keyEvent.type == KeyEventType.KeyDown) {
                     showControls = true
-                    when (keyEvent.key) {
-                        Key.DirectionCenter, Key.Enter, Key.Spacebar -> {
-                            if (vlcPlayerManager.isPlaying) {
-                                vlcPlayerManager.pause()
-                            } else {
-                                vlcPlayerManager.play()
-                            }
-                            true
-                        }
-                        Key.Back, Key.Escape -> {
+
+                    if (isAnyControlFocused) {
+                        // Focus is held by one of the control buttons. Let Compose's D-Pad focus system handle directional arrows!
+                        if (keyEvent.key == Key.Back || keyEvent.key == Key.Escape) {
                             saveProgressAndExit()
                             true
+                        } else {
+                            false
                         }
-                        Key.DirectionLeft -> {
-                            val newPos = (vlcPlayerManager.currentPosition - 10000).coerceAtLeast(0)
-                            vlcPlayerManager.seekTo(newPos)
-                            true
-                        }
-                        Key.DirectionRight -> {
-                            val duration = vlcPlayerManager.duration
-                            val newPos = if (duration > 0) {
-                                (vlcPlayerManager.currentPosition + 15000).coerceAtMost(duration)
-                            } else {
-                                vlcPlayerManager.currentPosition + 15000
+                    } else {
+                        // Focus is on background video surface:
+                        when (keyEvent.key) {
+                            Key.DirectionCenter, Key.Enter, Key.Spacebar -> {
+                                if (vlcPlayerManager.isPlaying) {
+                                    vlcPlayerManager.pause()
+                                } else {
+                                    vlcPlayerManager.play()
+                                }
+                                true
                             }
-                            vlcPlayerManager.seekTo(newPos)
-                            true
+                            Key.Back, Key.Escape -> {
+                                saveProgressAndExit()
+                                true
+                            }
+                            Key.DirectionUp -> {
+                                try {
+                                    opcoesButtonFocusRequester.requestFocus()
+                                } catch (e: Exception) {
+                                    // Ignore focus error
+                                }
+                                true
+                            }
+                            Key.DirectionDown -> {
+                                try {
+                                    audioButtonFocusRequester.requestFocus()
+                                } catch (e: Exception) {
+                                    // Ignore focus error
+                                }
+                                true
+                            }
+                            Key.DirectionLeft -> {
+                                val newPos = (vlcPlayerManager.currentPosition - 10000).coerceAtLeast(0)
+                                vlcPlayerManager.seekTo(newPos)
+                                true
+                            }
+                            Key.DirectionRight -> {
+                                val duration = vlcPlayerManager.duration
+                                val newPos = if (duration > 0) {
+                                    (vlcPlayerManager.currentPosition + 15000).coerceAtMost(duration)
+                                } else {
+                                    vlcPlayerManager.currentPosition + 15000
+                                }
+                                vlcPlayerManager.seekTo(newPos)
+                                true
+                            }
+                            else -> false
                         }
-                        else -> false
                     }
                 } else false
             }
@@ -310,6 +354,7 @@ fun VideoPlayerScreen(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
+                    keepScreenOn = true
                     vlcPlayerManager.attachVideoLayout(this)
                 }
             },
@@ -348,42 +393,48 @@ fun VideoPlayerScreen(
                         horizontalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
                         // Back Button
-                        IconButton(
+                        Surface(
                             onClick = saveProgressAndExit,
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.Transparent
-                            ),
-                            modifier = Modifier.size(48.dp)
+                            shape = CircleShape,
+                            color = if (isBackFocused) Color.White else Color.Transparent,
+                            border = if (isBackFocused) BorderStroke(2.dp, Color.White) else null,
+                            modifier = Modifier
+                                .focusRequester(backButtonFocusRequester)
+                                .focusProperties {
+                                    right = opcoesButtonFocusRequester
+                                    down = playButtonFocusRequester
+                                }
+                                .onFocusChanged { isBackFocused = it.isFocused }
+                                .size(48.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ArrowBack,
-                                contentDescription = "Voltar",
-                                tint = Color.White,
-                                modifier = Modifier.size(28.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowBack,
+                                    contentDescription = "Voltar",
+                                    tint = if (isBackFocused) Color.Black else Color.White,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
 
                         // Options Button (Icon + "OPTIONS" text below)
-                        var isOpcoesFocused by remember { mutableStateOf(false) }
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
+                        Surface(
+                            onClick = { showOptionsDialog = true },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isOpcoesFocused) Color.White.copy(alpha = 0.25f) else Color.Transparent,
+                            border = if (isOpcoesFocused) BorderStroke(2.dp, Color.White) else null,
                             modifier = Modifier
                                 .focusRequester(opcoesButtonFocusRequester)
+                                .focusProperties {
+                                    left = backButtonFocusRequester
+                                    right = nextEpFocusRequester
+                                    down = playButtonFocusRequester
+                                }
                                 .onFocusChanged { isOpcoesFocused = it.isFocused }
-                                .border(
-                                    width = if (isOpcoesFocused) 2.dp else 0.dp,
-                                    color = if (isOpcoesFocused) Color.White else Color.Transparent,
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                .padding(4.dp)
-                                .clickable { showOptionsDialog = true }
                         ) {
-                            IconButton(
-                                onClick = { showOptionsDialog = true },
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = Color.Transparent
-                                ),
-                                modifier = Modifier.size(36.dp)
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Settings,
@@ -391,30 +442,40 @@ fun VideoPlayerScreen(
                                     tint = Color.White,
                                     modifier = Modifier.size(24.dp)
                                 )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "OPTIONS",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                )
                             }
-                            Text(
-                                text = "OPTIONS",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp
-                            )
                         }
 
                         // Next Episode Button (|▷)
-                        IconButton(
+                        Surface(
                             onClick = { /* Next episode action if any */ },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.Transparent
-                            ),
-                            modifier = Modifier.size(48.dp)
+                            shape = CircleShape,
+                            color = if (isNextEpFocused) Color.White else Color.Transparent,
+                            border = if (isNextEpFocused) BorderStroke(2.dp, Color.White) else null,
+                            modifier = Modifier
+                                .focusRequester(nextEpFocusRequester)
+                                .focusProperties {
+                                    left = opcoesButtonFocusRequester
+                                    down = playButtonFocusRequester
+                                }
+                                .onFocusChanged { isNextEpFocused = it.isFocused }
+                                .size(48.dp)
                         ) {
-                            Text(
-                                text = "|▷",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Text(
+                                    text = "|▷",
+                                    color = if (isNextEpFocused) Color.Black else Color.White,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
 
@@ -674,21 +735,32 @@ fun VideoPlayerScreen(
                 Box(
                     modifier = Modifier.align(Alignment.Center)
                 ) {
-                    IconButton(
+                    Surface(
                         onClick = {
                             if (vlcPlayerManager.isPlaying) vlcPlayerManager.pause() else vlcPlayerManager.play()
                         },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = Color.Black.copy(alpha = 0.6f)
-                        ),
-                        modifier = Modifier.size(72.dp)
+                        shape = CircleShape,
+                        color = if (isPlayFocused) Color.White else Color.Black.copy(alpha = 0.6f),
+                        border = if (isPlayFocused) BorderStroke(3.dp, Color.White) else null,
+                        modifier = Modifier
+                            .focusRequester(playButtonFocusRequester)
+                            .focusProperties {
+                                up = opcoesButtonFocusRequester
+                                down = audioButtonFocusRequester
+                                left = backButtonFocusRequester
+                                right = nextEpFocusRequester
+                            }
+                            .onFocusChanged { isPlayFocused = it.isFocused }
+                            .size(72.dp)
                     ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Tocar/Pausar",
-                            tint = Color.White,
-                            modifier = Modifier.size(40.dp)
-                        )
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Tocar/Pausar",
+                                tint = if (isPlayFocused) Color.Black else Color.White,
+                                modifier = Modifier.size(40.dp)
+                            )
+                        }
                     }
                 }
 
@@ -784,10 +856,36 @@ fun VideoPlayerScreen(
                         }
                     }
 
-                    // Bottom pill buttons (Audio, Subtitles, Other, Settings gear)
+                    // Dynamic track labels calculation
+                    val audioTracksList = remember(showAudioDialog, showControls) {
+                        vlcPlayerManager.getAudioTracks() ?: emptyArray()
+                    }
+                    val currentAudioId = vlcPlayerManager.getSelectedAudioTrack()
+                    val currentAudioTrackName = audioTracksList.find { it.id == currentAudioId }?.name
+                        ?: if (audioTracksList.isNotEmpty()) audioTracksList[0].name else null
+
+                    val audioButtonText = if (!currentAudioTrackName.isNullOrBlank()) {
+                        "✓ ${cleanTrackName(currentAudioTrackName)}"
+                    } else {
+                        "✓ Português [Original]"
+                    }
+
+                    val spuTracksList = remember(showSubtitleDialog, showControls) {
+                        vlcPlayerManager.getSpuTracks() ?: emptyArray()
+                    }
+                    val currentSpuId = vlcPlayerManager.getSelectedSpuTrack()
+                    val currentSpuTrackName = spuTracksList.find { it.id == currentSpuId }?.name
+
+                    val subtitleButtonText = if (currentSpuId != -1 && !currentSpuTrackName.isNullOrBlank()) {
+                        "Legendas [${cleanTrackName(currentSpuTrackName)}]"
+                    } else {
+                        "Legendas [Desativadas]"
+                    }
+
+                    // Bottom pill buttons (Audio, Subtitles, Other)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.Start,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (!isLiveChannel) {
@@ -795,18 +893,17 @@ fun VideoPlayerScreen(
                                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                var isAudioFocused by remember { mutableStateOf(false) }
                                 Button(
                                     onClick = { showAudioDialog = true },
                                     modifier = Modifier
                                         .focusRequester(audioButtonFocusRequester)
+                                        .focusProperties {
+                                            up = playButtonFocusRequester
+                                            right = subtitleButtonFocusRequester
+                                        }
                                         .onFocusChanged { isAudioFocused = it.isFocused }
-                                        .height(40.dp)
-                                        .border(
-                                            width = if (isAudioFocused) 2.dp else 0.dp,
-                                            color = if (isAudioFocused) Color.White else Color.Transparent,
-                                            shape = RoundedCornerShape(20.dp)
-                                        ),
+                                        .height(40.dp),
+                                    border = if (isAudioFocused) BorderStroke(2.dp, Color.White) else null,
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = if (isAudioFocused) Color.White else Color.Black.copy(alpha = 0.5f),
                                         contentColor = if (isAudioFocused) Color.Black else Color.White
@@ -814,24 +911,24 @@ fun VideoPlayerScreen(
                                     shape = RoundedCornerShape(20.dp)
                                 ) {
                                     Text(
-                                        text = "✓ Português [Original]",
+                                        text = audioButtonText,
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
 
-                                var isSubtitleFocused by remember { mutableStateOf(false) }
                                 Button(
                                     onClick = { showSubtitleDialog = true },
                                     modifier = Modifier
                                         .focusRequester(subtitleButtonFocusRequester)
+                                        .focusProperties {
+                                            up = playButtonFocusRequester
+                                            left = audioButtonFocusRequester
+                                            right = outrosButtonFocusRequester
+                                        }
                                         .onFocusChanged { isSubtitleFocused = it.isFocused }
-                                        .height(40.dp)
-                                        .border(
-                                            width = if (isSubtitleFocused) 2.dp else 0.dp,
-                                            color = if (isSubtitleFocused) Color.White else Color.Transparent,
-                                            shape = RoundedCornerShape(20.dp)
-                                        ),
+                                        .height(40.dp),
+                                    border = if (isSubtitleFocused) BorderStroke(2.dp, Color.White) else null,
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = if (isSubtitleFocused) Color.White else Color.Black.copy(alpha = 0.5f),
                                         contentColor = if (isSubtitleFocused) Color.Black else Color.White
@@ -839,24 +936,23 @@ fun VideoPlayerScreen(
                                     shape = RoundedCornerShape(20.dp)
                                 ) {
                                     Text(
-                                        text = "Legendas [Desativadas]",
+                                        text = subtitleButtonText,
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
 
-                                var isOutrosFocused by remember { mutableStateOf(false) }
                                 Button(
                                     onClick = { showOutrosDialog = true },
                                     modifier = Modifier
                                         .focusRequester(outrosButtonFocusRequester)
+                                        .focusProperties {
+                                            up = playButtonFocusRequester
+                                            left = subtitleButtonFocusRequester
+                                        }
                                         .onFocusChanged { isOutrosFocused = it.isFocused }
-                                        .height(40.dp)
-                                        .border(
-                                            width = if (isOutrosFocused) 2.dp else 0.dp,
-                                            color = if (isOutrosFocused) Color.White else Color.Transparent,
-                                            shape = RoundedCornerShape(20.dp)
-                                        ),
+                                        .height(40.dp),
+                                    border = if (isOutrosFocused) BorderStroke(2.dp, Color.White) else null,
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = if (isOutrosFocused) Color.White else Color.Black.copy(alpha = 0.5f),
                                         contentColor = if (isOutrosFocused) Color.Black else Color.White
@@ -870,21 +966,6 @@ fun VideoPlayerScreen(
                                     )
                                 }
                             }
-                        } else {
-                            Spacer(modifier = Modifier.width(1.dp))
-                        }
-
-                        // Gear Icon on the bottom right
-                        IconButton(
-                            onClick = { showOptionsDialog = true },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Configurações",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
                         }
                     }
                 }
@@ -897,77 +978,22 @@ fun VideoPlayerScreen(
                 showOptionsDialog = false
                 try { opcoesButtonFocusRequester.requestFocus() } catch(e: Exception) {}
             }
-            AlertDialog(
-                onDismissRequest = {
+            OptionSelectionDialog(
+                title = "Proporção da Tela (Aspect Ratio)",
+                icon = Icons.Default.AspectRatio,
+                options = listOf(
+                    "Original" to null,
+                    "Preencher (16:9)" to "16:9",
+                    "Esticar" to "21:9",
+                    "4:3 / Zoom" to "4:3"
+                ),
+                selectedVal = vlcPlayerManager.currentAspectRatio,
+                onSelectOption = { ratioVal ->
+                    vlcPlayerManager.setAspectRatio(ratioVal)
+                },
+                onDismiss = {
                     showOptionsDialog = false
                     try { opcoesButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                },
-                containerColor = Color(0xFF141414),
-                shape = RoundedCornerShape(16.dp),
-                title = {
-                    Text("Proporção da Tela (Aspect Ratio)", color = Color.White, fontWeight = FontWeight.Bold)
-                },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        val ratios = listOf(
-                            "Original" to null,
-                            "Preencher (16:9)" to "16:9",
-                            "Esticar" to "21:9",
-                            "4:3 / Zoom" to "4:3"
-                        )
-                        ratios.forEach { (label, ratioVal) ->
-                            var isItemFocused by remember { mutableStateOf(false) }
-                            Button(
-                                onClick = {
-                                    vlcPlayerManager.setAspectRatio(ratioVal)
-                                    showOptionsDialog = false
-                                    try { opcoesButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .onFocusChanged { isItemFocused = it.isFocused }
-                                    .onKeyEvent { keyEvent ->
-                                        if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Escape || keyEvent.key == Key.Back)) {
-                                            showOptionsDialog = false
-                                            try { opcoesButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                                            true
-                                        } else false
-                                    }
-                                    .border(
-                                        width = if (isItemFocused) 2.dp else 1.dp,
-                                        color = if (isItemFocused) Color.White else Color.White.copy(alpha = 0.2f),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isItemFocused) Color.White else Color.White.copy(alpha = 0.1f),
-                                    contentColor = if (isItemFocused) Color.Black else Color.White
-                                ),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = if (isItemFocused) Color.Black else Color.White,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                },
-                confirmButton = {},
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            showOptionsDialog = false
-                            try { opcoesButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                        }
-                    ) {
-                        Text("Fechar", color = Color.White)
-                    }
                 }
             )
         }
@@ -978,76 +1004,28 @@ fun VideoPlayerScreen(
                 showAudioDialog = false
                 try { audioButtonFocusRequester.requestFocus() } catch(e: Exception) {}
             }
-            val audioTracks = remember { vlcPlayerManager.getAudioTracks() ?: emptyArray() }
-            AlertDialog(
-                onDismissRequest = {
+            val rawAudioTracks = vlcPlayerManager.getAudioTracks() ?: emptyArray()
+            val audioTrackList = if (rawAudioTracks.isNotEmpty()) {
+                rawAudioTracks.map { Pair(it.id, cleanTrackName(it.name ?: "Áudio ${it.id}")) }
+            } else {
+                listOf(Pair(1, "Português (Brasil)"))
+            }
+
+            val activeAudioId = vlcPlayerManager.getSelectedAudioTrack().let {
+                if (it == -1 && audioTrackList.isNotEmpty()) audioTrackList[0].first else it
+            }
+
+            TrackSelectionDialog(
+                title = "Áudio / Idiomas",
+                tracks = audioTrackList,
+                selectedTrackId = activeAudioId,
+                hasDisableOption = false,
+                onSelectTrack = { trackId ->
+                    vlcPlayerManager.setAudioTrack(trackId)
+                },
+                onDismiss = {
                     showAudioDialog = false
                     try { audioButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                },
-                containerColor = Color(0xFF141414),
-                shape = RoundedCornerShape(16.dp),
-                title = {
-                    Text("Áudio / Idiomas", color = Color.White, fontWeight = FontWeight.Bold)
-                },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (audioTracks.isEmpty()) {
-                            Text("Nenhuma faixa de áudio adicional encontrada", color = Color.LightGray)
-                        } else {
-                            audioTracks.forEach { track ->
-                                var isItemFocused by remember { mutableStateOf(false) }
-                                Button(
-                                    onClick = {
-                                        vlcPlayerManager.setAudioTrack(track.id)
-                                        showAudioDialog = false
-                                        try { audioButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .onFocusChanged { isItemFocused = it.isFocused }
-                                        .onKeyEvent { keyEvent ->
-                                            if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Escape || keyEvent.key == Key.Back)) {
-                                                showAudioDialog = false
-                                                try { audioButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                                                true
-                                            } else false
-                                        }
-                                        .border(
-                                            width = if (isItemFocused) 2.dp else 1.dp,
-                                            color = if (isItemFocused) Color.White else Color.White.copy(alpha = 0.2f),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isItemFocused) Color.White else Color.White.copy(alpha = 0.1f),
-                                        contentColor = if (isItemFocused) Color.Black else Color.White
-                                    ),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        text = track.name ?: "Áudio ${track.id}",
-                                        color = if (isItemFocused) Color.Black else Color.White,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {},
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            showAudioDialog = false
-                            try { audioButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                        }
-                    ) {
-                        Text("Fechar", color = Color.White)
-                    }
                 }
             )
         }
@@ -1058,96 +1036,21 @@ fun VideoPlayerScreen(
                 showSubtitleDialog = false
                 try { subtitleButtonFocusRequester.requestFocus() } catch(e: Exception) {}
             }
-            val subtitleTracks = remember { vlcPlayerManager.getSpuTracks() ?: emptyArray() }
-            AlertDialog(
-                onDismissRequest = {
+            val rawSpuTracks = vlcPlayerManager.getSpuTracks() ?: emptyArray()
+            val subtitleTrackList = rawSpuTracks.map { Pair(it.id, cleanTrackName(it.name ?: "Legenda ${it.id}")) }
+
+            TrackSelectionDialog(
+                title = "Legendas",
+                tracks = subtitleTrackList,
+                selectedTrackId = vlcPlayerManager.getSelectedSpuTrack(),
+                hasDisableOption = true,
+                disableOptionLabel = "Desativar",
+                onSelectTrack = { trackId ->
+                    vlcPlayerManager.setSpuTrack(trackId)
+                },
+                onDismiss = {
                     showSubtitleDialog = false
                     try { subtitleButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                },
-                containerColor = Color(0xFF141414),
-                shape = RoundedCornerShape(16.dp),
-                title = {
-                    Text("Legendas", color = Color.White, fontWeight = FontWeight.Bold)
-                },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        var isDisableFocused by remember { mutableStateOf(false) }
-                        Button(
-                            onClick = {
-                                vlcPlayerManager.setSpuTrack(-1)
-                                showSubtitleDialog = false
-                                try { subtitleButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .onFocusChanged { isDisableFocused = it.isFocused }
-                                .onKeyEvent { keyEvent ->
-                                    if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Escape || keyEvent.key == Key.Back)) {
-                                        showSubtitleDialog = false
-                                        try { subtitleButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                                        true
-                                    } else false
-                                }
-                                .border(
-                                    width = if (isDisableFocused) 2.dp else 1.dp,
-                                    color = if (isDisableFocused) Color.White else Color.White.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(8.dp)
-                                ),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isDisableFocused) Color.White else Color.White.copy(alpha = 0.1f),
-                                contentColor = if (isDisableFocused) Color.Black else Color.White
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Legendas [Desativadas]", color = if (isDisableFocused) Color.Black else Color.White, fontWeight = FontWeight.Bold)
-                        }
-
-                        subtitleTracks.forEach { track ->
-                            var isItemFocused by remember { mutableStateOf(false) }
-                            Button(
-                                onClick = {
-                                    vlcPlayerManager.setSpuTrack(track.id)
-                                    showSubtitleDialog = false
-                                    try { subtitleButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .onFocusChanged { isItemFocused = it.isFocused }
-                                    .border(
-                                        width = if (isItemFocused) 2.dp else 1.dp,
-                                        color = if (isItemFocused) Color.White else Color.White.copy(alpha = 0.2f),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isItemFocused) Color.White else Color.White.copy(alpha = 0.1f),
-                                    contentColor = if (isItemFocused) Color.Black else Color.White
-                                ),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text(
-                                    text = track.name ?: "Legenda ${track.id}",
-                                    color = if (isItemFocused) Color.Black else Color.White,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                },
-                confirmButton = {},
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            showSubtitleDialog = false
-                            try { subtitleButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                        }
-                    ) {
-                        Text("Fechar", color = Color.White)
-                    }
                 }
             )
         }
@@ -1158,62 +1061,17 @@ fun VideoPlayerScreen(
                 showOutrosDialog = false
                 try { outrosButtonFocusRequester.requestFocus() } catch(e: Exception) {}
             }
-            AlertDialog(
-                onDismissRequest = {
+            OptionSelectionDialog(
+                title = "Outras Opções",
+                icon = Icons.Default.Info,
+                options = listOf(
+                    "Informações da Mídia" to "info"
+                ),
+                selectedVal = "info",
+                onSelectOption = { },
+                onDismiss = {
                     showOutrosDialog = false
                     try { outrosButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                },
-                containerColor = Color(0xFF141414),
-                shape = RoundedCornerShape(16.dp),
-                title = {
-                    Text("Outras Opções", color = Color.White, fontWeight = FontWeight.Bold)
-                },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        var isItemFocused by remember { mutableStateOf(false) }
-                        val itemFocusRequester = remember { FocusRequester() }
-                        LaunchedEffect(Unit) {
-                            try { itemFocusRequester.requestFocus() } catch(e: Exception) {}
-                        }
-                        Button(
-                            onClick = {
-                                showOutrosDialog = false
-                                try { outrosButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusRequester(itemFocusRequester)
-                                .onFocusChanged { isItemFocused = it.isFocused }
-                                .border(
-                                    width = if (isItemFocused) 2.dp else 1.dp,
-                                    color = if (isItemFocused) Color.White else Color.White.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(8.dp)
-                                ),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isItemFocused) Color.White else Color.White.copy(alpha = 0.1f),
-                                contentColor = if (isItemFocused) Color.Black else Color.White
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Informações da Mídia", color = if (isItemFocused) Color.Black else Color.White, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                },
-                confirmButton = {},
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            showOutrosDialog = false
-                            try { outrosButtonFocusRequester.requestFocus() } catch(e: Exception) {}
-                        }
-                    ) {
-                        Text("Fechar", color = Color.White)
-                    }
                 }
             )
         }
@@ -1456,6 +1314,385 @@ fun VideoPlayerScreen(
             }
         }
     }
+}
+
+private fun cleanTrackName(rawName: String?): String {
+    if (rawName.isNullOrBlank()) return "Português (Brasil)"
+    return when {
+        rawName.contains("Portuguese", ignoreCase = true) || rawName.contains("Português", ignoreCase = true) || rawName.contains("por", ignoreCase = true) || rawName.contains("pt", ignoreCase = true) -> "Português (Brasil)"
+        rawName.contains("English", ignoreCase = true) || rawName.contains("Inglês", ignoreCase = true) || rawName.contains("eng", ignoreCase = true) -> "Inglês"
+        rawName.contains("Spanish", ignoreCase = true) || rawName.contains("Espanhol", ignoreCase = true) || rawName.contains("spa", ignoreCase = true) -> "Espanhol"
+        else -> rawName
+    }
+}
+
+@Composable
+private fun TrackSelectionDialog(
+    title: String,
+    tracks: List<Pair<Int, String>>,
+    selectedTrackId: Int,
+    hasDisableOption: Boolean = false,
+    disableOptionLabel: String = "Desativar",
+    onSelectTrack: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val firstItemFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        try {
+            firstItemFocusRequester.requestFocus()
+        } catch (e: Exception) {
+            // Ignore focus error
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF13151D),
+        shape = RoundedCornerShape(20.dp),
+        title = null,
+        text = {
+            Column(
+                modifier = Modifier
+                    .width(420.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                // Header Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Public,
+                        contentDescription = null,
+                        tint = Color.LightGray.copy(alpha = 0.6f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Disable option if requested
+                    if (hasDisableOption) {
+                        val isSelected = selectedTrackId == -1
+                        var isFocused by remember { mutableStateOf(false) }
+
+                        Surface(
+                            onClick = {
+                                onSelectTrack(-1)
+                                onDismiss()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp)
+                                .focusRequester(firstItemFocusRequester)
+                                .onFocusChanged { isFocused = it.isFocused },
+                            border = if (isFocused) BorderStroke(2.dp, Color.White) else if (isSelected) BorderStroke(1.5.dp, Color(0xFF3B68B2)) else null,
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) Color(0xFF1C283D) else Color(0xFF1A1C24)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = disableOptionLabel,
+                                    color = if (isSelected) Color.White else Color(0xFFD0D0D0),
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 15.sp
+                                )
+
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Selecionado",
+                                        tint = Color(0xFF4C82E6),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .border(1.5.dp, Color.Gray, CircleShape)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Track Items
+                    tracks.forEachIndexed { index, (trackId, trackName) ->
+                        val isSelected = trackId == selectedTrackId
+                        var isFocused by remember { mutableStateOf(false) }
+                        val itemRequester = if (!hasDisableOption && index == 0) firstItemFocusRequester else remember { FocusRequester() }
+
+                        val showOriginalBadge = trackName.contains("Portuguese", ignoreCase = true) ||
+                                trackName.contains("Português", ignoreCase = true) ||
+                                trackName.contains("Original", ignoreCase = true) ||
+                                (index == 0 && !hasDisableOption)
+
+                        Surface(
+                            onClick = {
+                                onSelectTrack(trackId)
+                                onDismiss()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp)
+                                .focusRequester(itemRequester)
+                                .onFocusChanged { isFocused = it.isFocused },
+                            border = if (isFocused) BorderStroke(2.dp, Color.White) else if (isSelected) BorderStroke(1.5.dp, Color(0xFF3B68B2)) else null,
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) Color(0xFF1C283D) else Color(0xFF1A1C24)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f, fill = false)
+                                ) {
+                                    Text(
+                                        text = trackName,
+                                        color = if (isSelected) Color.White else Color(0xFFD0D0D0),
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 15.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+
+                                    if (showOriginalBadge) {
+                                        Surface(
+                                            color = Color(0xFF283A59),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "ORIGINAL",
+                                                color = Color(0xFF83A9E8),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Selecionado",
+                                        tint = Color(0xFF4C82E6),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .border(1.5.dp, Color.Gray, CircleShape)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom Fechar Pill Button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 24.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    var isCloseFocused by remember { mutableStateOf(false) }
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isCloseFocused) Color.White else Color(0xFF2B2E38),
+                            contentColor = if (isCloseFocused) Color.Black else Color.White
+                        ),
+                        border = if (isCloseFocused) BorderStroke(2.dp, Color.White) else null,
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .height(38.dp)
+                            .onFocusChanged { isCloseFocused = it.isFocused }
+                    ) {
+                        Text(
+                            text = "Fechar",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {}
+    )
+}
+
+@Composable
+private fun OptionSelectionDialog(
+    title: String,
+    icon: ImageVector = Icons.Default.Settings,
+    options: List<Pair<String, String?>>,
+    selectedVal: String?,
+    onSelectOption: (String?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val firstItemFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        try {
+            firstItemFocusRequester.requestFocus()
+        } catch (e: Exception) {
+            // Ignore focus error
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF13151D),
+        shape = RoundedCornerShape(20.dp),
+        title = null,
+        text = {
+            Column(
+                modifier = Modifier
+                    .width(420.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                // Header Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp
+                    )
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = Color.LightGray.copy(alpha = 0.6f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    options.forEachIndexed { index, (label, value) ->
+                        val isSelected = (selectedVal == value) || (selectedVal == null && value == null)
+                        var isFocused by remember { mutableStateOf(false) }
+                        val itemRequester = if (index == 0) firstItemFocusRequester else remember { FocusRequester() }
+
+                        Surface(
+                            onClick = {
+                                onSelectOption(value)
+                                onDismiss()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp)
+                                .focusRequester(itemRequester)
+                                .onFocusChanged { isFocused = it.isFocused },
+                            border = if (isFocused) BorderStroke(2.dp, Color.White) else if (isSelected) BorderStroke(1.5.dp, Color(0xFF3B68B2)) else null,
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) Color(0xFF1C283D) else Color(0xFF1A1C24)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) Color.White else Color(0xFFD0D0D0),
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 15.sp
+                                )
+
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Selecionado",
+                                        tint = Color(0xFF4C82E6),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .border(1.5.dp, Color.Gray, CircleShape)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom Fechar Button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 24.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    var isCloseFocused by remember { mutableStateOf(false) }
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isCloseFocused) Color.White else Color(0xFF2B2E38),
+                            contentColor = if (isCloseFocused) Color.Black else Color.White
+                        ),
+                        border = if (isCloseFocused) BorderStroke(2.dp, Color.White) else null,
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .height(38.dp)
+                            .onFocusChanged { isCloseFocused = it.isFocused }
+                    ) {
+                        Text(
+                            text = "Fechar",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {}
+    )
 }
 
 

@@ -22,6 +22,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -53,9 +55,48 @@ class IPTVRepository(private val context: Context) {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val original = chain.request()
+            val requestBuilder = original.newBuilder()
+                .header("User-Agent", "IPTVSmartersPlayer")
+                .header("Accept", "*/*")
+            chain.proceed(requestBuilder.build())
+        }
         .build()
 
-    private val tmdbSemaphore = Semaphore(8)
+    private fun parseJsonArraySafely(bodyStr: String?): JSONArray? {
+        if (bodyStr.isNullOrBlank()) return null
+        val firstBracket = bodyStr.indexOf('[')
+        val lastBracket = bodyStr.lastIndexOf(']')
+        if (firstBracket != -1 && lastBracket > firstBracket) {
+            val substring = bodyStr.substring(firstBracket, lastBracket + 1)
+            return try {
+                JSONArray(substring)
+            } catch (e: Exception) {
+                Log.e("IPTVRepository", "Error parsing JSONArray substring", e)
+                null
+            }
+        }
+        return null
+    }
+
+    private fun parseJsonObjectSafely(bodyStr: String?): JSONObject? {
+        if (bodyStr.isNullOrBlank()) return null
+        val firstBrace = bodyStr.indexOf('{')
+        val lastBrace = bodyStr.lastIndexOf('}')
+        if (firstBrace != -1 && lastBrace > firstBrace) {
+            val substring = bodyStr.substring(firstBrace, lastBrace + 1)
+            return try {
+                JSONObject(substring)
+            } catch (e: Exception) {
+                Log.e("IPTVRepository", "Error parsing JSONObject substring", e)
+                null
+            }
+        }
+        return null
+    }
+
+    private val tmdbSemaphore = Semaphore(4)
     @Volatile private var isPrefetchRunning = false
 
     // Profiles Flow
@@ -133,6 +174,23 @@ class IPTVRepository(private val context: Context) {
         val url = sharedPrefs.getString("last_ep_url_${profileId}_${seriesId}", null)
         if (title != null && url != null) {
             Pair(title, url)
+        } else {
+            null
+        }
+    }
+
+    suspend fun saveEpisodeWatchProgress(profileId: Int, seriesId: Int, episodeKey: String, position: Long, duration: Long) = withContext(Dispatchers.IO) {
+        sharedPrefs.edit()
+            .putLong("ep_pos_${profileId}_${seriesId}_${episodeKey}", position)
+            .putLong("ep_dur_${profileId}_${seriesId}_${episodeKey}", duration)
+            .apply()
+    }
+
+    suspend fun getEpisodeWatchProgress(profileId: Int, seriesId: Int, episodeKey: String): Pair<Long, Long>? = withContext(Dispatchers.IO) {
+        val pos = sharedPrefs.getLong("ep_pos_${profileId}_${seriesId}_${episodeKey}", -1L)
+        val dur = sharedPrefs.getLong("ep_dur_${profileId}_${seriesId}_${episodeKey}", -1L)
+        if (pos > 0 && dur > 0) {
+            Pair(pos, dur)
         } else {
             null
         }
@@ -218,9 +276,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(seriesCategoriesUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val catId = obj.optString("category_id")
@@ -253,9 +311,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(seriesUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val name = obj.optString("name")
@@ -309,9 +367,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(vodCategoriesUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val catId = obj.optString("category_id")
@@ -344,9 +402,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(vodStreamsUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val name = obj.optString("name")
@@ -505,9 +563,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(vodCategoriesUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val catId = obj.optString("category_id")
@@ -542,9 +600,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(seriesCategoriesUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val catId = obj.optString("category_id")
@@ -579,9 +637,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(liveCategoriesUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val catId = obj.optString("category_id")
@@ -615,9 +673,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(seriesUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val name = obj.optString("name")
@@ -670,9 +728,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(vodStreamsUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val name = obj.optString("name")
@@ -722,9 +780,9 @@ class IPTVRepository(private val context: Context) {
                 val req = Request.Builder().url(liveStreamsUrl).build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
-                        val bodyStr = response.body?.string() ?: ""
-                        if (bodyStr.trim().startsWith("[")) {
-                            val jsonArray = JSONArray(bodyStr)
+                        val bodyStr = response.body?.string()
+                        val jsonArray = parseJsonArraySafely(bodyStr)
+                        if (jsonArray != null) {
                             for (i in 0 until jsonArray.length()) {
                                 val obj = jsonArray.getJSONObject(i)
                                 val name = obj.optString("name")
@@ -762,31 +820,40 @@ class IPTVRepository(private val context: Context) {
             ).map { it.second }
             parsedItems.addAll(sortedLive)
 
-            // Fallback to M3U downloading if JSON API yielded no items
-            if (parsedItems.isEmpty()) {
-                val url = "$formattedServer/get.php?username=$username&password=$password&type=m3u_plus&output=ts"
-                val request = Request.Builder().url(url).build()
-                val response = client.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val body = response.body
-                    if (body != null) {
-                        val reader = BufferedReader(InputStreamReader(body.byteStream()))
-                        var extinfLine: String? = null
-                        var line = reader.readLine()
-                        while (line != null) {
-                            val trimmed = line.trim()
-                            if (trimmed.startsWith("#EXTINF:")) {
-                                extinfLine = trimmed
-                            } else if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                                if (extinfLine != null) {
-                                    val item = parseItemLine(extinfLine, trimmed)
-                                    parsedItems.add(item)
-                                    extinfLine = null
+            // Fallback to M3U downloading if JSON API yielded no items or if movies/series were missed
+            if (parsedItems.isEmpty() || rawMovies.isEmpty() || rawSeries.isEmpty()) {
+                onProgress("Baixando lista M3U complementar...", 0.85f)
+                val m3uUrl = "$formattedServer/get.php?username=$username&password=$password&type=m3u_plus&output=ts"
+                try {
+                    val request = Request.Builder().url(m3uUrl).build()
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val body = response.body
+                            if (body != null) {
+                                val reader = BufferedReader(InputStreamReader(body.byteStream()))
+                                var extinfLine: String? = null
+                                var line = reader.readLine()
+                                val existingUrls = parsedItems.map { it.url }.toSet()
+                                while (line != null) {
+                                    val trimmed = line.trim()
+                                    if (trimmed.startsWith("#EXTINF:")) {
+                                        extinfLine = trimmed
+                                    } else if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                                        if (extinfLine != null) {
+                                            val item = parseItemLine(extinfLine, trimmed)
+                                            if (item.url !in existingUrls) {
+                                                parsedItems.add(item)
+                                            }
+                                            extinfLine = null
+                                        }
+                                    }
+                                    line = reader.readLine()
                                 }
                             }
-                            line = reader.readLine()
                         }
                     }
+                } catch (e: Exception) {
+                    Log.e("IPTVRepository", "Error in M3U fallback download", e)
                 }
             }
 
@@ -803,6 +870,12 @@ class IPTVRepository(private val context: Context) {
                 } else {
                     item.copy(cleanTitle = item.title)
                 }
+            }
+
+            if (fullyParsed.isEmpty()) {
+                Log.e("IPTVRepository", "No items parsed from server")
+                onProgress("Nenhum item foi encontrado no servidor. Verifique suas credenciais.", 0f)
+                return@withContext false
             }
 
             if (isSilentSync) {
@@ -961,13 +1034,57 @@ class IPTVRepository(private val context: Context) {
         return if (clean.isEmpty()) title else clean
     }
 
-    private fun getOverrideTmdbId(title: String, cleanTitle: String, isSeries: Boolean): Int? {
+    private fun getOverrideTmdbId(item: PlaylistItem, cleanTitle: String, isSeries: Boolean): Int? {
+        return getOverrideTmdbId(item.title, cleanTitle, isSeries, item.groupName, item.id)
+    }
+
+    private fun getOverrideTmdbId(title: String, cleanTitle: String, isSeries: Boolean, groupName: String = "", itemId: Int = 0): Int? {
         val lowerClean = cleanTitle.lowercase().trim()
         val lowerTitle = title.lowercase().trim()
-        if (lowerClean == "furia" || lowerClean == "fúria" || lowerTitle.contains("furia") || lowerTitle.contains("fúria")) {
-            return 287238
+        val lowerGroup = groupName.lowercase().trim()
+
+        if (!isSeries) {
+            // Filmes:
+            // "Céu de Fúria", "Ceu em Furia", "Céu em Fúria", "Ceu de Furia" ou se o filme for nomeado "Fúria" / "Furia"
+            val isCeuDeFuria = (lowerTitle.contains("ceu") || lowerTitle.contains("céu")) &&
+                    (lowerTitle.contains("furia") || lowerTitle.contains("fúria"))
+            val isExactFuriaMovie = lowerClean == "furia" || lowerClean == "fúria" || lowerTitle == "furia" || lowerTitle == "fúria"
+
+            if (isCeuDeFuria || isExactFuriaMovie) {
+                return 1323244 // TMDB ID do filme "Céu em Fúria" / "Rage of Stars" (2026)
+            }
+            // Qualquer outro filme com a palavra furia ("Fúria de Titãs", "Fúria Silenciosa", "Fúria Incontrolável", etc.)
+            // deve retornar null para obter seus metadados originais de filme via busca TMDB!
+            return null
         }
+
         if (isSeries) {
+            // Séries "Doc":
+            // Disney+ tem a série "Doc" (2025 - ID 255055)
+            // Netflix tem a série "DOC – Uma Nova Vida" (Doc - Nelle tue mani - ID 101048)
+            val isDocSeries = lowerClean == "doc" || lowerTitle == "doc" ||
+                    lowerTitle.startsWith("doc ") || lowerTitle.contains("doc -") || lowerTitle.contains("doc –")
+            if (isDocSeries) {
+                return if (lowerGroup.contains("netflix")) {
+                    101048 // DOC – Uma Nova Vida (Netflix)
+                } else if (lowerGroup.contains("disney")) {
+                    255055 // Doc (Disney+)
+                } else {
+                    if (lowerTitle.contains("nova vida")) 101048 else 255055
+                }
+            }
+
+            // Séries "Fúria":
+            // Somente quando o título da série for especificamente "Fúria" / "Furia" (não títulos compostos)
+            val isExactFuriaSeries = lowerClean == "furia" || lowerClean == "fúria" || lowerTitle == "furia" || lowerTitle == "fúria"
+            if (isExactFuriaSeries) {
+                return if (lowerGroup.contains("disney")) {
+                    287238 // Série Fúria (Disney+)
+                } else {
+                    292533 // Série Fúria (Netflix / Geral)
+                }
+            }
+
             if (lowerClean == "james" ||
                 lowerTitle.endsWith("james") ||
                 (lowerTitle.contains("james") && !lowerTitle.contains("bond") && !lowerTitle.contains("may") && !lowerTitle.contains("brown"))
@@ -985,25 +1102,86 @@ class IPTVRepository(private val context: Context) {
     }
 
     /**
-     * A resposta de imagens do TMDB pode trazer códigos de idioma simples ("pt")
-     * ou regionais ("pt-BR"). Esta ordem garante a preferência brasileira sem
-     * impedir um fallback quando a obra não possuir arte localizada no Brasil.
+     * Seleciona o melhor logotipo de acordo com a prioridade estrita solicitada:
+     * 1. Português do Brasil (pt-BR)
+     * 2. Português geral (pt)
+     * 3. Português de Portugal (pt-PT)
+     * 4. Inglês (en / en-US) - SOMENTE se não houver NENHUMA versão em Português!
+     * 5. Outros idiomas / neutro
      */
+    fun selectBestTmdbLogo(logosArr: JSONArray?): String? {
+        if (logosArr == null || logosArr.length() == 0) return null
+
+        data class LogoCandidate(
+            val path: String,
+            val tier: Int, // 0 = pt-BR, 1 = pt (geral), 2 = pt-PT, 3 = en / en-US, 4 = outro/null
+            val score: Double,
+            val width: Int
+        )
+
+        val candidates = mutableListOf<LogoCandidate>()
+
+        for (i in 0 until logosArr.length()) {
+            val obj = logosArr.optJSONObject(i) ?: continue
+            val filePath = obj.optString("file_path", "").trim()
+            if (filePath.isEmpty()) continue
+
+            val lang = obj.optString("iso_639_1", "").lowercase().trim()
+            val country = obj.optString("iso_3166_1", "").uppercase().trim()
+            val voteAvg = obj.optDouble("vote_average", 0.0)
+            val voteCount = obj.optInt("vote_count", 0)
+            val aspectRatio = obj.optDouble("aspect_ratio", 1.0)
+            val width = obj.optInt("width", 0)
+
+            // Classificação estrita de tier:
+            // Tier 0: Português do Brasil (pt-BR)
+            // Tier 1: Português (geral ou sem restrição)
+            // Tier 2: Português de Portugal (pt-PT)
+            // Tier 3: Inglês (en / en-US) - SÓ E APENAS SE NÃO EXISTIR NENHUM EM PORTUGUÊS!
+            // Tier 4: Outros idiomas ou nulo
+            val tier = when {
+                (lang == "pt" && country == "BR") || lang == "pt-br" -> 0
+                lang == "pt" && country.isEmpty() -> 1
+                lang == "pt" && country != "PT" -> 1
+                (lang == "pt" && country == "PT") || lang == "pt-pt" -> 2
+                lang == "en" || lang == "en-us" -> 3
+                else -> 4
+            }
+
+            // Bônus para logos horizontais (proporção típica de título 1.3 a 6.5)
+            val aspectBonus = if (aspectRatio in 1.3..6.5) 5.0 else 0.0
+            val score = (voteAvg * 2.0) + (voteCount.toDouble().coerceAtMost(10.0) * 0.5) + aspectBonus
+
+            candidates.add(LogoCandidate(filePath, tier, score, width))
+        }
+
+        if (candidates.isEmpty()) return null
+
+        // Ordenação estrita: Menor tier primeiro (0 ganha sempre), depois maior score, depois maior largura
+        val best = candidates.minWithOrNull(
+            compareBy<LogoCandidate> { it.tier }
+                .thenByDescending { it.score }
+                .thenByDescending { it.width }
+        )
+
+        return best?.path
+    }
+
     private fun logoLanguagePriority(language: String): Int = when (language.lowercase()) {
         "pt-br" -> 0
         "pt" -> 1
         "en-us" -> 2
         "en" -> 3
         "" -> 4
-        "pt-pt" -> 20 // Prioridade baixíssima para evitar logos de Portugal
+        "pt-pt" -> 20
         else -> 30
     }
 
-    fun getTmdbImageUrl(path: String?): String? {
+    fun getTmdbImageUrl(path: String?, size: String = "w780"): String? {
         if (path.isNullOrEmpty()) return null
         val filename = path.substringAfterLast("/")
         if (filename.isEmpty()) return null
-        return "https://image.tmdb.org/t/p/original/$filename"
+        return "https://image.tmdb.org/t/p/$size/$filename"
     }
 
     private fun findPreferredTmdbLogo(
@@ -1015,43 +1193,48 @@ class IPTVRepository(private val context: Context) {
             "https://api.themoviedb.org/3/$mediaType/$tmdbId/images" +
                     "?api_key=$apiKey&language=pt-BR&include_image_language=pt-BR,pt,en-US,en,null"
 
-        client.newCall(Request.Builder().url(imagesUrl).build()).execute().use { response ->
-            if (!response.isSuccessful) {
-                Log.w("IPTVRepository", "TMDB images failed for id=$tmdbId: HTTP ${response.code}")
+        try {
+            client.newCall(Request.Builder().url(imagesUrl).build()).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w("IPTVRepository", "TMDB images failed for id=$tmdbId: HTTP ${response.code}")
+                    return null
+                }
+
+                val logos = JSONObject(response.body?.string().orEmpty()).optJSONArray("logos") ?: return null
+                val bestPath = selectBestTmdbLogo(logos)
+                if (bestPath != null) {
+                    return getTmdbImageUrl(bestPath, "w780")
+                }
                 return null
             }
-
-            val logos = JSONObject(response.body?.string().orEmpty()).optJSONArray("logos") ?: return null
-            var selectedPath: String? = null
-            var selectedLanguage = ""
-            var selectedPriority = Int.MAX_VALUE
-
-            for (index in 0 until logos.length()) {
-                val logo = logos.optJSONObject(index) ?: continue
-                val path = logo.optString("file_path").takeIf { it.isNotBlank() } ?: continue
-                val language = logo.optString("iso_639_1").orEmpty()
-                val priority = logoLanguagePriority(language)
-
-                if (priority < selectedPriority) {
-                    selectedPath = path
-                    selectedLanguage = language
-                    selectedPriority = priority
-                }
-            }
-
-            if (selectedPath != null) {
-                Log.d(
-                    "IPTVRepository",
-                    "TMDB logo selected for id=$tmdbId: language=${selectedLanguage.ifBlank { "null" }}, priority=$selectedPriority"
-                )
-                return getTmdbImageUrl(selectedPath)
-            }
-            Log.w("IPTVRepository", "TMDB returned no usable logo for id=$tmdbId")
+        } catch (e: Exception) {
+            Log.e("IPTVRepository", "Error finding preferred logo for $mediaType/$tmdbId", e)
             return null
         }
     }
 
     fun isMetadataComplete(item: PlaylistItem): Boolean {
+        val cleanTitle = cleanTitleForSearch(item.title)
+        val isSeries = item.type == "series" || item.groupName.contains("Série", ignoreCase = true) || item.groupName.contains("Serie", ignoreCase = true)
+        val overrideId = getOverrideTmdbId(item, cleanTitle, isSeries)
+
+        if (overrideId != null && item.tmdbId != overrideId.toString()) {
+            return false
+        }
+
+        // Se for um filme mas foi salvo anteriormente com ID de série (como 292533 ou 287238), não está completo!
+        if (!isSeries && (item.tmdbId == "292533" || item.tmdbId == "287238")) {
+            return false
+        }
+
+        // Se for a série Doc na Netflix mas pegou o ID da Disney (255055), não está completo!
+        if (isSeries && item.groupName.contains("netflix", ignoreCase = true) &&
+            (cleanTitle.lowercase() == "doc" || item.title.lowercase().trim() == "doc") &&
+            item.tmdbId == "255055"
+        ) {
+            return false
+        }
+
         return item.metadataLoaded || (
                 !item.posterUrl.isNullOrBlank() &&
                         !item.backdropUrl.isNullOrBlank() &&
@@ -1063,10 +1246,10 @@ class IPTVRepository(private val context: Context) {
                 )
     }
 
-    suspend fun enrichItemWithTMDB(item: PlaylistItem): PlaylistItem = withContext(Dispatchers.IO) {
+    suspend fun enrichItemWithTMDB(item: PlaylistItem, updateDb: Boolean = true): PlaylistItem = withContext(Dispatchers.IO) {
         val cleanTitle = cleanTitleForSearch(item.title)
         val isSeries = item.type == "series" || item.groupName.contains("Série", ignoreCase = true) || item.groupName.contains("Serie", ignoreCase = true)
-        val overrideId = getOverrideTmdbId(item.title, cleanTitle, isSeries)
+        val overrideId = getOverrideTmdbId(item, cleanTitle, isSeries)
 
         if (isMetadataComplete(item) && (overrideId == null || item.tmdbId == overrideId.toString())) {
             return@withContext item
@@ -1075,7 +1258,7 @@ class IPTVRepository(private val context: Context) {
         tmdbSemaphore.withPermit {
             val tmdbApiKey = BuildConfig.TMDB_API_KEY.ifEmpty { "355b405bb005248e382a8b400ebab70b" }
             try {
-                val searchType = if (isSeries || overrideId == 287238 || overrideId == 321596 || overrideId == 326119) "tv" else "movie"
+                val searchType = if (isSeries) "tv" else "movie"
 
                 var foundId = 0
                 var firstResult: JSONObject? = null
@@ -1179,24 +1362,9 @@ class IPTVRepository(private val context: Context) {
                                 val imagesObj = detailJson.optJSONObject("images")
                                 if (imagesObj != null) {
                                     val logosArr = imagesObj.optJSONArray("logos")
-                                    if (logosArr != null && logosArr.length() > 0) {
-                                        var bestLogo: String? = null
-                                        var bestPriority = Int.MAX_VALUE
-                                        for (l in 0 until logosArr.length()) {
-                                            val logoObj = logosArr.getJSONObject(l)
-                                            val lang = logoObj.optString("iso_639_1", "")
-                                            val filePath = logoObj.optString("file_path", "")
-                                            if (filePath.isNotBlank()) {
-                                                val priority = logoLanguagePriority(lang)
-                                                if (priority < bestPriority) {
-                                                    bestPriority = priority
-                                                    bestLogo = filePath
-                                                }
-                                            }
-                                        }
-                                        if (!bestLogo.isNullOrEmpty()) {
-                                            clearLogoUrl = getTmdbImageUrl(bestLogo)
-                                        }
+                                    val bestLogo = selectBestTmdbLogo(logosArr)
+                                    if (!bestLogo.isNullOrEmpty()) {
+                                        clearLogoUrl = getTmdbImageUrl(bestLogo, "w780")
                                     }
                                 }
                             }
@@ -1212,9 +1380,9 @@ class IPTVRepository(private val context: Context) {
                     }
 
                     val year = if (dateStr.length >= 4) dateStr.substring(0, 4) else ""
-                    val pUrl = getTmdbImageUrl(posterPath) ?: item.posterUrl ?: item.logoUrl
-                    val bUrl = getTmdbImageUrl(backdropPath) ?: item.backdropUrl
-                    val cLogo = getTmdbImageUrl(clearLogoUrl) ?: item.clearLogoUrl ?: item.titleLogoUrl ?: item.logo
+                    val pUrl = getTmdbImageUrl(posterPath, "w500") ?: item.posterUrl ?: item.logoUrl
+                    val bUrl = getTmdbImageUrl(backdropPath, "w1280") ?: item.backdropUrl
+                    val cLogo = getTmdbImageUrl(clearLogoUrl, "w500") ?: item.clearLogoUrl ?: item.titleLogoUrl ?: item.logo
 
                     val enriched = item.copy(
                         posterUrl = pUrl,
@@ -1233,7 +1401,9 @@ class IPTVRepository(private val context: Context) {
                         metadataLoaded = true,
                         lastMetadataUpdate = System.currentTimeMillis()
                     )
-                    playlistDao.updateItem(enriched)
+                    if (updateDb) {
+                        playlistDao.updateItem(enriched)
+                    }
                     return@withPermit enriched
                 }
             } catch (e: Exception) {
@@ -1488,9 +1658,9 @@ class IPTVRepository(private val context: Context) {
                 posterUrl = "https://image.tmdb.org/t/p/original/3kN9JhUAzzMLTdrSVd6ivigjh59.jpg",
                 logoUrl = "https://image.tmdb.org/t/p/original/3kN9JhUAzzMLTdrSVd6ivigjh59.jpg",
                 backdropUrl = "https://image.tmdb.org/t/p/original/mJDCrEFKHUqoZe4xyI8CE47pw7P.jpg",
-                titleLogoUrl = "https://image.tmdb.org/t/p/original/8VDfGY16827yyWH0R8itxLtfgK1.png",
-                clearLogoUrl = "https://image.tmdb.org/t/p/original/8VDfGY16827yyWH0R8itxLtfgK1.png",
-                logo = "https://image.tmdb.org/t/p/original/8VDfGY16827yyWH0R8itxLtfgK1.png",
+                titleLogoUrl = "https://image.tmdb.org/t/p/original/e0HtKXHvWKFiYmzP3G8xLo7jo5B.png",
+                clearLogoUrl = "https://image.tmdb.org/t/p/original/e0HtKXHvWKFiYmzP3G8xLo7jo5B.png",
+                logo = "https://image.tmdb.org/t/p/original/e0HtKXHvWKFiYmzP3G8xLo7jo5B.png",
                 description = "Trailer Oficial Dublado",
                 year = "Trailer Oficial Dublado",
                 genre = "Ação / Suspense",
@@ -1687,7 +1857,7 @@ class IPTVRepository(private val context: Context) {
         val cleanTitle = item.getCleanPtBrTitle()
         val isSeries = item.type == "series" || item.groupName.contains("Série", ignoreCase = true)
 
-        val overrideId = getOverrideTmdbId(item.title, cleanTitle, isSeries)
+        val overrideId = getOverrideTmdbId(item, cleanTitle, isSeries)
         var tmdbId = overrideId ?: 0
 
         if (tmdbId <= 0 && item.id in 1..999999) {
@@ -2088,7 +2258,7 @@ class IPTVRepository(private val context: Context) {
         val searchType = if (isSeries) "tv" else "movie"
 
         try {
-            val overrideId = getOverrideTmdbId(item.title, cleanTitle, isSeries)
+            val overrideId = getOverrideTmdbId(item, cleanTitle, isSeries)
             var tmdbId = overrideId ?: item.tmdbId?.toIntOrNull() ?: 0
 
             if (tmdbId == 0) {
@@ -2176,7 +2346,7 @@ class IPTVRepository(private val context: Context) {
         }
 
         try {
-            val overrideId = getOverrideTmdbId(item.title, cleanTitle, true)
+            val overrideId = getOverrideTmdbId(item, cleanTitle, true)
             var tmdbId = overrideId ?: item.tmdbId?.toIntOrNull() ?: 0
 
             if (tmdbId == 0) {
@@ -2586,56 +2756,99 @@ class IPTVRepository(private val context: Context) {
         Log.d("IPTVRepository", "Starting intelligent parallel background metadata prefetch...")
 
         try {
-            // Phase 0: Override items re-enrichment (e.g. Fúria)
+            // Phase 0: Override items & collision fixes ("Fúria", "Doc", Céu de Fúria)
             try {
-                val overrideItems = playlistDao.getItemsByTitleQuery("%furia%") + playlistDao.getItemsByTitleQuery("%fúria%")
-                overrideItems.distinctBy { it.id }.forEach { item ->
-                    try {
-                        enrichItemWithTMDB(item)
-                    } catch (e: Exception) {
-                        Log.e("IPTVRepository", "Error enriching override item ${item.title}", e)
+                val furiaItems = playlistDao.getItemsByTitleQuery("%furia%") + playlistDao.getItemsByTitleQuery("%fúria%")
+                val docItems = playlistDao.getItemsByTitleQuery("%doc%")
+                val ruaItems = playlistDao.getItemsByTitleQuery("%fim da rua%") + playlistDao.getItemsByTitleQuery("%oak street%")
+                val candidates = (furiaItems + docItems + ruaItems).distinctBy { it.id }
+
+                val itemsToUpdate = mutableListOf<PlaylistItem>()
+                for (candidate in candidates) {
+                    val isSeries = candidate.type == "series" || candidate.groupName.contains("Série", ignoreCase = true) || candidate.groupName.contains("Serie", ignoreCase = true)
+                    val cleanTitle = cleanTitleForSearch(candidate.title)
+                    val overrideId = getOverrideTmdbId(candidate, cleanTitle, isSeries)
+
+                    val hasWrongSeriesId = !isSeries && (candidate.tmdbId == "292533" || candidate.tmdbId == "287238")
+                    val hasWrongDocId = isSeries && candidate.groupName.contains("netflix", ignoreCase = true) && candidate.tmdbId == "255055"
+                    val hasWrongOverride = overrideId != null && candidate.tmdbId != overrideId.toString()
+                    val hasEnglishOakLogo = candidate.clearLogoUrl?.contains("8VDfGY16827yyWH0R8itxLtfgK1") == true ||
+                            candidate.titleLogoUrl?.contains("8VDfGY16827yyWH0R8itxLtfgK1") == true
+
+                    if (hasWrongSeriesId || hasWrongDocId || hasWrongOverride || hasEnglishOakLogo || !candidate.metadataLoaded) {
+                        val itemToEnrich = candidate.copy(
+                            tmdbId = overrideId?.toString() ?: if (hasWrongSeriesId) null else candidate.tmdbId,
+                            metadataLoaded = false,
+                            posterUrl = if (hasWrongSeriesId) null else candidate.posterUrl,
+                            backdropUrl = if (hasWrongSeriesId) null else candidate.backdropUrl,
+                            clearLogoUrl = if (hasWrongSeriesId || hasEnglishOakLogo) null else candidate.clearLogoUrl,
+                            titleLogoUrl = if (hasWrongSeriesId || hasEnglishOakLogo) null else candidate.titleLogoUrl
+                        )
+                        try {
+                            val enriched = enrichItemWithTMDB(itemToEnrich, updateDb = false)
+                            if (enriched.metadataLoaded) {
+                                itemsToUpdate.add(enriched)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("IPTVRepository", "Error healing candidate ${candidate.title}", e)
+                        }
                     }
                 }
+                if (itemsToUpdate.isNotEmpty()) {
+                    playlistDao.updateItems(itemsToUpdate)
+                }
             } catch (e: Exception) {
-                Log.e("IPTVRepository", "Error querying override items", e)
+                Log.e("IPTVRepository", "Error querying override collision items", e)
             }
 
             // Phase 1: Priority Prefetching (Visible items: Tendências, Os Mais Populares, Banners)
-            val priorityItems = playlistDao.getPriorityUnenrichedItems()
+            val priorityItems = playlistDao.getPriorityUnenrichedItems().take(30)
             Log.d("IPTVRepository", "Phase 1: Found ${priorityItems.size} priority items for background metadata enrichment")
 
             if (priorityItems.isNotEmpty()) {
-                priorityItems.chunked(16).forEach { chunk ->
-                    chunk.map { item ->
+                priorityItems.chunked(3).forEach { chunk ->
+                    if (!isActive) return@withContext
+                    val enrichedChunk = chunk.map { item ->
                         async(Dispatchers.IO) {
                             try {
-                                enrichItemWithTMDB(item)
+                                enrichItemWithTMDB(item, updateDb = false)
                             } catch (e: Exception) {
-                                Log.e("IPTVRepository", "Priority metadata prefetch failed for ${item.title}", e)
+                                item
                             }
                         }
                     }.awaitAll()
+                    val toUpdate = enrichedChunk.filter { it.metadataLoaded }
+                    if (toUpdate.isNotEmpty()) {
+                        playlistDao.updateItems(toUpdate)
+                    }
+                    delay(100)
                 }
             }
 
-            // Phase 2: Full Catalog Prefetching (All remaining Movies and Series in Room)
-            val remainingItems = playlistDao.getAllUnenrichedItems()
-            Log.d("IPTVRepository", "Phase 2: Found ${remainingItems.size} remaining catalog items for background metadata enrichment")
+            // Phase 2: Gentle Catalog Prefetching (Limited batch with low CPU/RAM footprint for TV devices)
+            val remainingItems = playlistDao.getAllUnenrichedItems().take(20)
+            Log.d("IPTVRepository", "Phase 2: Processing up to ${remainingItems.size} catalog items gently")
 
             if (remainingItems.isNotEmpty()) {
-                remainingItems.chunked(32).forEach { chunk ->
-                    chunk.map { item ->
+                remainingItems.chunked(3).forEach { chunk ->
+                    if (!isActive) return@withContext
+                    val enrichedChunk = chunk.map { item ->
                         async(Dispatchers.IO) {
                             try {
-                                enrichItemWithTMDB(item)
+                                enrichItemWithTMDB(item, updateDb = false)
                             } catch (e: Exception) {
-                                Log.e("IPTVRepository", "Catalog metadata prefetch failed for ${item.title}", e)
+                                item
                             }
                         }
                     }.awaitAll()
+                    val toUpdate = enrichedChunk.filter { it.metadataLoaded }
+                    if (toUpdate.isNotEmpty()) {
+                        playlistDao.updateItems(toUpdate)
+                    }
+                    delay(300)
                 }
             }
-            Log.d("IPTVRepository", "Parallel background metadata prefetch completed successfully!")
+            Log.d("IPTVRepository", "Gentle background metadata prefetch completed successfully!")
         } catch (e: Exception) {
             Log.e("IPTVRepository", "Error during background metadata prefetch", e)
         } finally {

@@ -102,8 +102,7 @@ fun PlaylistItem.cleanSeriesName(): String {
 fun groupSeriesList(list: List<PlaylistItem>): List<PlaylistItem> {
     if (list.isEmpty()) return emptyList()
 
-    // Efficiently clean and group series in a single pass using a LinkedHashMap to preserve order of first appearance.
-    // This is O(N) instead of O(N^2) or sorting multiple times.
+    // Efficiently clean and group series in a single O(N) pass using a LinkedHashMap
     val groupedMap = java.util.LinkedHashMap<String, PlaylistItem>()
     for (item in list) {
         val cleanedTitle = item.cleanTitle ?: item.cleanSeriesName()
@@ -112,36 +111,5 @@ fun groupSeriesList(list: List<PlaylistItem>): List<PlaylistItem> {
             groupedMap[key] = item.copy(title = cleanedTitle, cleanTitle = cleanedTitle)
         }
     }
-
-    val result = ArrayList(groupedMap.values)
-
-    // Only perform advanced prefix-based deduplication if the list is reasonably small (< 800 items).
-    // For giant playlists, prefix comparison would cause O(N^2) lag and UI freeze.
-    if (result.size < 800) {
-        class SearchItem(
-            val item: PlaylistItem,
-            val lowerTitleTrimmed: String
-        )
-        val finalResult = ArrayList<SearchItem>()
-        val sortedByLength = result.sortedBy { it.title.length }
-        for (item in sortedByLength) {
-            val itemLower = item.title.lowercase().trim()
-            val hasPrefix = finalResult.any { existing ->
-                existing.item.groupName == item.groupName && (
-                    itemLower.startsWith(existing.lowerTitleTrimmed + " -") ||
-                    itemLower.startsWith(existing.lowerTitleTrimmed + " :") ||
-                    itemLower.startsWith(existing.lowerTitleTrimmed + " ")
-                )
-            }
-            if (!hasPrefix) {
-                finalResult.add(SearchItem(item, itemLower))
-            }
-        }
-
-        // Restore original order
-        val orderMap = result.mapIndexed { idx, item -> item to idx }.toMap()
-        return finalResult.map { it.item }.sortedBy { orderMap[it] ?: 999999 }
-    }
-
-    return result
+    return ArrayList(groupedMap.values)
 }

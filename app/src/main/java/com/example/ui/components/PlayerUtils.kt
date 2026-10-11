@@ -25,7 +25,7 @@ fun PlaylistItem.getEffectiveTitleLogoUrl(): String? {
         title.contains("Odisseia", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/jpLOFTHacWoxCTCLRePVlLHxrbo.png"
         title.contains("Perder", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/3pzH42BKQ0z30fM9DPwSewvWYLS.png"
         title.contains("Backrooms", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/oHP5aXQ4gg15t9EsBhgKENeCKdG.png"
-        title.contains("Rua", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/8VDfGY16827yyWH0R8itxLtfgK1.png"
+        title.contains("Rua", ignoreCase = true) || title.contains("Oak Street", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/e0HtKXHvWKFiYmzP3G8xLo7jo5B.png"
         title.contains("Hope", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/iEYvlw4yqSp9Ck6Iz90V31QSD7D.png"
         title.contains("Jackass", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/zdzXhbQgjOQzrQ6Yq5kWepYw7MJ.png"
         title.contains("Cinzenta", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/9w0aK6Vs1YqSp13EhrlZVQ4TJ1u.png"
@@ -44,7 +44,7 @@ fun String.toOriginalTmdbUrl(): String {
     if (this.contains("image.tmdb.org/t/p/")) {
         val filename = this.substringAfterLast("/")
         if (filename.isNotEmpty()) {
-            return "https://image.tmdb.org/t/p/original/$filename"
+            return "https://image.tmdb.org/t/p/w1280/$filename"
         }
     }
     return this

@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
@@ -35,10 +36,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
+import coil.imageLoader
 import coil.ImageLoader
 import coil.decode.SvgDecoder
 import com.example.data.model.UserProfile
+import com.example.data.model.PlaylistItem
 import com.example.ui.components.StreaTVLogo
+import com.example.ui.components.LogoAsyncImage
+import com.example.ui.components.getEffectiveTitleLogoUrl
+import com.example.ui.components.toOriginalTmdbUrl
 import com.example.ui.viewmodel.IPTVViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -52,6 +58,59 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
+
+val profileFallbackBackgroundItems = listOf(
+    PlaylistItem(
+        id = 9901,
+        title = "O DIA DA REVELAÇÃO",
+        url = "",
+        groupName = "Tendências",
+        type = "movie",
+        backdropUrl = "https://image.tmdb.org/t/p/w1280/m3Pom6pbD51bBv3syz8NMHda3fz.jpg",
+        titleLogoUrl = "https://image.tmdb.org/t/p/w500/jpLOFTHacWoxCTCLRePVlLHxrbo.png",
+        description = "A existência de vida extraterrestre torna-se uma realidade inegável para todos os habitantes da Terra em um único instante...."
+    ),
+    PlaylistItem(
+        id = 9921,
+        title = "A Casa do Dragão",
+        url = "",
+        groupName = "Tendências",
+        type = "series",
+        backdropUrl = "https://image.tmdb.org/t/p/w1280/577eXC8wFQT0eUrJcgznSiFPRmk.jpg",
+        titleLogoUrl = "https://image.tmdb.org/t/p/w500/oKJDm4QCKbp6mR4FnxXrFlPJP8Y.png",
+        description = "A história da Casa Targaryen, ambientada 200 anos antes dos eventos de Game of Thrones, lutando pelo Trono de Ferro."
+    ),
+    PlaylistItem(
+        id = 9902,
+        title = "Deadpool & Wolverine",
+        url = "",
+        groupName = "Tendências",
+        type = "movie",
+        backdropUrl = "https://image.tmdb.org/t/p/w1280/yDHYTfA3R0jFYba16jBB128StOp.jpg",
+        titleLogoUrl = "https://image.tmdb.org/t/p/w500/3kN9JhUAzzMLTdrSVd6ivigjh59.png",
+        description = "Wolverine está se recuperando quando cruza o caminho do tagarela Deadpool. Eles se unem para derrotar um inimigo comum."
+    ),
+    PlaylistItem(
+        id = 9903,
+        title = "Duna: Parte 2",
+        url = "",
+        groupName = "Tendências",
+        type = "movie",
+        backdropUrl = "https://image.tmdb.org/t/p/w1280/xOMo8A2W2fR9LSpA28A26PAt23.jpg",
+        titleLogoUrl = "https://image.tmdb.org/t/p/w500/zH4h1hP7djDgh3oQDWRDOyhRXFx.png",
+        description = "Paul Atreides se une a Chani e aos Fremen enquanto busca vingança contra os conspiradores que destruíram sua família."
+    ),
+    PlaylistItem(
+        id = 9908,
+        title = "Backrooms",
+        url = "",
+        groupName = "Tendências",
+        type = "movie",
+        backdropUrl = "https://image.tmdb.org/t/p/w1280/mCpwRayjXMFzKHbjbzc5JRKfq1O.jpg",
+        titleLogoUrl = "https://image.tmdb.org/t/p/w500/oHP5aXQ4gg15t9EsBhgKENeCKdG.png",
+        description = "Um labirinto infinito de salas amarelas vazias habitadas por uma entidade misteriosa."
+    )
+)
 
 // High-quality cinematic character avatar choices
 data class AvatarOption(val id: String, val url: String, val name: String)
@@ -100,6 +159,31 @@ fun ProfileSelectionScreen(
     viewModel: IPTVViewModel
 ) {
     val profiles by viewModel.profiles.collectAsState()
+    val trendingItems by viewModel.trendingItems.collectAsState()
+    val popularItems by viewModel.popularItems.collectAsState()
+    val movies by viewModel.movies.collectAsState()
+    val series by viewModel.series.collectAsState()
+
+    val backgroundItems = remember(trendingItems, popularItems, movies, series) {
+        val serverItems = (trendingItems + popularItems + movies.take(30) + series.take(30))
+            .filter { !it.backdropUrl.isNullOrBlank() }
+            .distinctBy { it.title.trim().lowercase() }
+        if (serverItems.isNotEmpty()) serverItems else profileFallbackBackgroundItems
+    }
+
+    var currentBgIndex by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(backgroundItems) {
+        if (backgroundItems.isNotEmpty()) {
+            while (true) {
+                delay(8000)
+                currentBgIndex = (currentBgIndex + 1) % backgroundItems.size
+            }
+        }
+    }
+
+    val currentFeaturedItem = backgroundItems.getOrNull(currentBgIndex) ?: backgroundItems.firstOrNull()
+
     var isInCreateMode by remember { mutableStateOf(false) }
     var isDeleteMode by remember { mutableStateOf(false) }
     var profileToDelete by remember { mutableStateOf<UserProfile?>(null) }
@@ -115,15 +199,14 @@ fun ProfileSelectionScreen(
     
     // Selection state for click animation feedback
     var selectedProfileId by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(Unit) {
+        selectedProfileId = null
+    }
     val coroutineScope = rememberCoroutineScope()
     val isLandscape = LocalContext.current.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val context = LocalContext.current
-    val svgImageLoader = remember {
-        ImageLoader.Builder(context)
-            .components {
-                add(SvgDecoder.Factory())
-            }
-            .build()
+    val svgImageLoader = remember(context) {
+        context.imageLoader
     }
     var selectedStyle by remember { mutableStateOf("OpenPeeps") }
     val displayedAvatars = remember(selectedStyle) {
@@ -150,6 +233,18 @@ fun ProfileSelectionScreen(
                 )
             )
     ) {
+        // Global Top Bar (Logo on left)
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 48.dp, top = 24.dp)
+        ) {
+            StreaTVLogo(
+                size = 46.dp,
+                showText = true
+            )
+        }
+
         AnimatedContent(
             targetState = isInCreateMode,
             transitionSpec = {
@@ -162,7 +257,7 @@ fun ProfileSelectionScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(top = 90.dp, bottom = 24.dp),
+                        .padding(top = 40.dp, bottom = 40.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     if (isLandscape) {
@@ -444,11 +539,12 @@ fun ProfileSelectionScreen(
 
                                 LazyVerticalGrid(
                                     columns = GridCells.Fixed(4),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.height(240.dp)
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp, start = 4.dp, end = 4.dp),
+                                    modifier = Modifier.height(235.dp)
                                 ) {
-                                    items(displayedAvatars) { avatar ->
+                                    items(displayedAvatars.take(8)) { avatar ->
                                         val isSelected = selectedAvatarUrl == avatar.url
                                         val avatarInteractionSource = remember { MutableInteractionSource() }
                                         val isAvatarHovered by avatarInteractionSource.collectIsHoveredAsState()
@@ -456,12 +552,12 @@ fun ProfileSelectionScreen(
                                         val isAvatarFocusedOrHovered = isAvatarFocused || isAvatarHovered
 
                                         val avatarScale by animateFloatAsState(
-                                            targetValue = if (isSelected) 1.18f else if (isAvatarFocusedOrHovered) 1.10f else 1.0f,
+                                            targetValue = if (isSelected) 1.06f else if (isAvatarFocusedOrHovered) 1.04f else 1.0f,
                                             animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
                                             label = "avatar_scale_land"
                                         )
                                         val avatarTranslationY by animateDpAsState(
-                                            targetValue = if (isAvatarFocusedOrHovered) (-4).dp else 0.dp,
+                                            targetValue = if (isAvatarFocusedOrHovered) (-2).dp else 0.dp,
                                             animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
                                             label = "avatar_jump_land"
                                         )
@@ -502,8 +598,10 @@ fun ProfileSelectionScreen(
                                                 model = avatar.url,
                                                 contentDescription = avatar.name,
                                                 imageLoader = svgImageLoader,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize()
+                                                contentScale = ContentScale.Fit,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(3.dp)
                                             )
                                         }
                                     }
@@ -674,7 +772,8 @@ fun ProfileSelectionScreen(
                                     columns = GridCells.Fixed(4),
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.height(180.dp)
+                                    contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp, start = 4.dp, end = 4.dp),
+                                    modifier = Modifier.height(195.dp)
                                 ) {
                                     items(displayedAvatars) { avatar ->
                                         val isSelected = selectedAvatarUrl == avatar.url
@@ -684,12 +783,12 @@ fun ProfileSelectionScreen(
                                         val isAvatarFocusedOrHovered = isAvatarFocused || isAvatarHovered
 
                                         val avatarScale by animateFloatAsState(
-                                            targetValue = if (isSelected) 1.18f else if (isAvatarFocusedOrHovered) 1.10f else 1.0f,
+                                            targetValue = if (isSelected) 1.06f else if (isAvatarFocusedOrHovered) 1.04f else 1.0f,
                                             animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
                                             label = "avatar_scale_port"
                                         )
                                         val avatarTranslationY by animateDpAsState(
-                                            targetValue = if (isAvatarFocusedOrHovered) (-4).dp else 0.dp,
+                                            targetValue = if (isAvatarFocusedOrHovered) (-2).dp else 0.dp,
                                             animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
                                             label = "avatar_jump_port"
                                         )
@@ -730,8 +829,10 @@ fun ProfileSelectionScreen(
                                                 model = avatar.url,
                                                 contentDescription = avatar.name,
                                                 imageLoader = svgImageLoader,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize()
+                                                contentScale = ContentScale.Fit,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(3.dp)
                                             )
                                         }
                                     }
@@ -846,338 +947,379 @@ fun ProfileSelectionScreen(
                     }
                 }
             } else {
-                // Profile Selection View
+                // Profile Selection View matching the provided image layout
                 Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.padding(horizontal = 24.dp)
-                    ) {
-                        Text(
-                            text = "Quem está assistindo?",
-                            fontSize = if (isLandscape) 40.sp else 30.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-0.5).sp,
-                            textAlign = TextAlign.Center
+                    // Fullscreen Cinematic Background Image cycling through featured movies/series
+                    val currentBackdrop = currentFeaturedItem?.backdropUrl?.toOriginalTmdbUrl()
+                        ?: currentFeaturedItem?.backdropUrl
+                        ?: "https://image.tmdb.org/t/p/original/m3Pom6pbD51bBv3syz8NMHda3fz.jpg"
+
+                    Crossfade(
+                        targetState = currentBackdrop,
+                        animationSpec = tween(1200),
+                        label = "profile_bg_crossfade"
+                    ) { bgUrl ->
+                        AsyncImage(
+                            model = bgUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Selecione um perfil para começar sua experiência cinema.",
-                            fontSize = 14.sp,
-                            color = Color.White.copy(alpha = 0.5f),
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(48.dp))
-
-                        // Horizontally scrollable Row for standard TV experience
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .horizontalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp)
-                        ) {
-                            profiles.forEach { profile ->
-                                val profileInteractionSource = remember { MutableInteractionSource() }
-                                val isProfileHovered by profileInteractionSource.collectIsHoveredAsState()
-                                var isCardFocused by remember { mutableStateOf(false) }
-                                val isFocusedOrHovered = isCardFocused || isProfileHovered
-                                val isSelected = selectedProfileId == profile.id
-
-                                // Dynamic scale & bounce animation targeting the "salto e zoom ao selecionar"
-                                val scale by animateFloatAsState(
-                                    targetValue = if (isSelected) 1.22f else if (isFocusedOrHovered) 1.12f else 1.0f,
-                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                                    label = "profile_scale"
-                                )
-
-                                val translationY by animateDpAsState(
-                                    targetValue = if (isSelected) (-16).dp else if (isFocusedOrHovered) (-8).dp else 0.dp,
-                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                                    label = "profile_jump"
-                                )
-
-                                val colorHex = try {
-                                    Color(android.graphics.Color.parseColor(profile.avatarColorHex))
-                                } catch (e: Exception) {
-                                    Color(0xFFFF0D1A)
-                                }
-
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier
-                                        .width(115.dp)
-                                        .graphicsLayer {
-                                            scaleX = scale
-                                            scaleY = scale
-                                            this.translationY = translationY.toPx()
-                                        }
-                                        .hoverable(profileInteractionSource)
-                                        .onFocusChanged { isCardFocused = it.isFocused }
-                                        .focusable()
-                                        .clickable(
-                                            interactionSource = profileInteractionSource,
-                                            indication = null
-                                        ) {
-                                            if (isDeleteMode) {
-                                                profileToDelete = profile
-                                            } else {
-                                                selectedProfileId = profile.id
-                                                coroutineScope.launch {
-                                                    delay(600) // let the bounce and zoom play nicely
-                                                    viewModel.selectProfile(profile)
-                                                }
-                                            }
-                                        }
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(100.dp)
-                                            .clip(CircleShape)
-                                            .background(colorHex)
-                                            .border(
-                                                width = if (isFocusedOrHovered) 3.dp else 1.5.dp,
-                                                color = if (isFocusedOrHovered) Color.White else Color.White.copy(alpha = 0.15f),
-                                                shape = CircleShape
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (profile.avatarIconName.startsWith("http")) {
-                                            SubcomposeAsyncImage(
-                                                model = profile.avatarIconName,
-                                                contentDescription = profile.name,
-                                                imageLoader = svgImageLoader,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize(),
-                                                loading = {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .background(Color.White.copy(alpha = 0.05f)),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        CircularProgressIndicator(
-                                                            color = Color(0xFFFF0D1A),
-                                                            strokeWidth = 2.dp,
-                                                            modifier = Modifier.size(20.dp)
-                                                        )
-                                                    }
-                                                },
-                                                error = {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .background(colorHex),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = profile.name.take(1).uppercase(),
-                                                            color = Color.White,
-                                                            fontSize = 32.sp,
-                                                            fontWeight = FontWeight.ExtraBold
-                                                        )
-                                                    }
-                                                }
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = if (isDeleteMode) Icons.Default.Delete else Icons.Default.Person,
-                                                contentDescription = profile.name,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(48.dp)
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                    Text(
-                                        text = profile.name,
-                                        color = if (isFocusedOrHovered) Color.White else Color.White.copy(alpha = 0.7f),
-                                        fontSize = 14.sp,
-                                        fontWeight = if (isFocusedOrHovered) FontWeight.Bold else FontWeight.Medium,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-
-                            // Add Profile circular card
-                            if (profiles.size < 5) {
-                                val addInteractionSource = remember { MutableInteractionSource() }
-                                val isAddHovered by addInteractionSource.collectIsHoveredAsState()
-                                var isAddFocused by remember { mutableStateOf(false) }
-                                val isAddFocusedOrHovered = isAddFocused || isAddHovered
-
-                                val addScale by animateFloatAsState(
-                                    targetValue = if (isAddFocusedOrHovered) 1.12f else 1.0f,
-                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                                    label = "add_scale"
-                                )
-                                val addTranslationY by animateDpAsState(
-                                    targetValue = if (isAddFocusedOrHovered) (-8).dp else 0.dp,
-                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                                    label = "add_jump"
-                                )
-
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier
-                                        .width(115.dp)
-                                        .graphicsLayer {
-                                            scaleX = addScale
-                                            scaleY = addScale
-                                            translationY = addTranslationY.toPx()
-                                        }
-                                        .hoverable(addInteractionSource)
-                                        .onFocusChanged { isAddFocused = it.isFocused }
-                                        .focusable()
-                                        .clickable(
-                                            interactionSource = addInteractionSource,
-                                            indication = null
-                                        ) { isInCreateMode = true }
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(100.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.White.copy(alpha = 0.03f))
-                                            .border(
-                                                width = if (isAddFocusedOrHovered) 3.dp else 1.5.dp,
-                                                color = if (isAddFocusedOrHovered) Color.White else Color.White.copy(alpha = 0.15f),
-                                                shape = CircleShape
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Adicionar Perfil",
-                                            tint = Color.White.copy(alpha = 0.6f),
-                                            modifier = Modifier.size(36.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                    Text(
-                                        text = "Novo Perfil",
-                                        color = if (isAddFocusedOrHovered) Color.White else Color.White.copy(alpha = 0.5f),
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(80.dp))
                     }
 
-                    // Bottom Navigation Buttons styled beautifully matching the mockup
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
-                        verticalAlignment = Alignment.CenterVertically,
+                    // Cinematic Dark Blue Gradient Vignette Overlay
+                    Box(
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 32.dp)
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    colorStops = arrayOf(
+                                        0.0f to Color(0xFF030712),
+                                        0.42f to Color(0xFF070E20).copy(alpha = 0.92f),
+                                        0.70f to Color(0xFF0F172A).copy(alpha = 0.45f),
+                                        1.0f to Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colorStops = arrayOf(
+                                        0.0f to Color(0xFF020617).copy(alpha = 0.82f),
+                                        0.25f to Color.Transparent,
+                                        0.75f to Color.Transparent,
+                                        1.0f to Color(0xFF020617).copy(alpha = 0.88f)
+                                    )
+                                )
+                            )
+                    )
+
+                    // Main Layout Content
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 48.dp, vertical = 32.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Gerenciar Perfis
-                        val manageInteractionSource = remember { MutableInteractionSource() }
-                        val isManageHovered by manageInteractionSource.collectIsHoveredAsState()
-                        var isManageFocused by remember { mutableStateOf(false) }
-                        val isManageFocusedOrHovered = isManageFocused || isManageHovered
-
-                        val manageScale by animateFloatAsState(
-                            targetValue = if (isManageFocusedOrHovered) 1.15f else 1.0f,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                            label = "manage_scale"
-                        )
-                        val manageTranslationY by animateDpAsState(
-                            targetValue = if (isManageFocusedOrHovered) (-4).dp else 0.dp,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                            label = "manage_jump"
-                        )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        // Left Side Column: Heading, Profile Cards, Add Profile Button
+                        Column(
                             modifier = Modifier
-                                .graphicsLayer {
-                                    scaleX = manageScale
-                                    scaleY = manageScale
-                                    translationY = manageTranslationY.toPx()
-                                }
-                                .hoverable(manageInteractionSource)
-                                .onFocusChanged { isManageFocused = it.isFocused }
-                                .focusable()
-                                .clickable(
-                                    interactionSource = manageInteractionSource,
-                                    indication = null
-                                ) { isDeleteMode = !isDeleteMode }
-                                .padding(8.dp)
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Gerenciar Perfis",
-                                tint = if (isDeleteMode) Color(0xFFFF0D1A) else if (isManageFocusedOrHovered) Color.White else Color.White.copy(alpha = 0.5f),
-                                modifier = Modifier.size(16.dp)
-                            )
+                            // Heading Text
                             Text(
-                                text = if (isDeleteMode) "CONCLUIR GERENCIAMENTO" else "GERENCIAR PERFIS",
-                                color = if (isDeleteMode) Color(0xFFFF0D1A) else if (isManageFocusedOrHovered) Color.White else Color.White.copy(alpha = 0.5f),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.5.sp
+                                text = "Quem está assistindo?",
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                letterSpacing = (-0.5).sp
                             )
+
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            // Vertical Profiles Pill Cards
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                                modifier = Modifier.widthIn(max = 380.dp)
+                            ) {
+                                profiles.forEach { profile ->
+                                    val cardInteractionSource = remember { MutableInteractionSource() }
+                                    val isCardHovered by cardInteractionSource.collectIsHoveredAsState()
+                                    var isCardFocused by remember { mutableStateOf(false) }
+
+                                    val trashInteractionSource = remember { MutableInteractionSource() }
+                                    val isTrashHovered by trashInteractionSource.collectIsHoveredAsState()
+                                    var isTrashFocused by remember { mutableStateOf(false) }
+
+                                    val isAnyFocusedOrHovered = isCardFocused || isTrashFocused || isCardHovered || isTrashHovered
+                                    val isSelected = selectedProfileId == profile.id
+
+                                    val cardScale by animateFloatAsState(
+                                        targetValue = if (isSelected) 1.05f else if (isAnyFocusedOrHovered) 1.03f else 1.0f,
+                                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                                        label = "card_scale"
+                                    )
+
+                                    val colorHex = try {
+                                        Color(android.graphics.Color.parseColor(profile.avatarColorHex))
+                                    } catch (e: Exception) {
+                                        Color(0xFF2563EB)
+                                    }
+
+                                    // Outer container row styled as the pill card
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(64.dp)
+                                            .graphicsLayer {
+                                                scaleX = cardScale
+                                                scaleY = cardScale
+                                            }
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(
+                                                if (isAnyFocusedOrHovered) Color(0xFF1E40AF).copy(alpha = 0.55f)
+                                                else Color.Black.copy(alpha = 0.45f)
+                                            )
+                                            .border(
+                                                width = if (isAnyFocusedOrHovered) 2.dp else 1.dp,
+                                                color = if (isAnyFocusedOrHovered) Color.White else Color.White.copy(alpha = 0.18f),
+                                                shape = RoundedCornerShape(16.dp)
+                                            )
+                                            .padding(start = 12.dp, end = 8.dp)
+                                    ) {
+                                        // Left Profile Main Clickable & Focusable Area (Avatar + Name)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight()
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .hoverable(cardInteractionSource)
+                                                .onFocusChanged { isCardFocused = it.isFocused }
+                                                .focusable(interactionSource = cardInteractionSource)
+                                                .clickable(
+                                                    interactionSource = cardInteractionSource,
+                                                    indication = null
+                                                ) {
+                                                    if (isDeleteMode) {
+                                                        profileToDelete = profile
+                                                    } else {
+                                                        selectedProfileId = profile.id
+                                                        coroutineScope.launch {
+                                                            delay(300)
+                                                            viewModel.selectProfile(profile)
+                                                        }
+                                                    }
+                                                }
+                                        ) {
+                                            // Avatar container
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(44.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(colorHex),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (profile.avatarIconName.startsWith("http")) {
+                                                    SubcomposeAsyncImage(
+                                                        model = profile.avatarIconName,
+                                                        contentDescription = profile.name,
+                                                        imageLoader = svgImageLoader,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        error = {
+                                                            Text(
+                                                                text = profile.name.take(1).uppercase(),
+                                                                color = Color.White,
+                                                                fontSize = 20.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Person,
+                                                        contentDescription = profile.name,
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            // Profile Name
+                                            Text(
+                                                text = profile.name,
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isCardFocused) Color.White else Color.White.copy(alpha = 0.9f),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(horizontal = 16.dp)
+                                            )
+                                        }
+
+                                        // Right Trash / Delete Button (Independently focusable via D-Pad Right Arrow)
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(42.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (isTrashFocused) Color(0xFFDC2626)
+                                                    else if (isTrashHovered) Color.White.copy(alpha = 0.2f)
+                                                    else Color.Transparent
+                                                )
+                                                .border(
+                                                    width = if (isTrashFocused) 2.dp else 0.dp,
+                                                    color = if (isTrashFocused) Color.White else Color.Transparent,
+                                                    shape = CircleShape
+                                                )
+                                                .hoverable(trashInteractionSource)
+                                                .onFocusChanged { isTrashFocused = it.isFocused }
+                                                .focusable(interactionSource = trashInteractionSource)
+                                                .clickable(
+                                                    interactionSource = trashInteractionSource,
+                                                    indication = null
+                                                ) {
+                                                    profileToDelete = profile
+                                                }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Excluir perfil",
+                                                tint = if (isTrashFocused) Color.White else Color.White.copy(alpha = 0.75f),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // "Adicionar Perfil" Button Row
+                                if (profiles.size < 5) {
+                                    val addInteractionSource = remember { MutableInteractionSource() }
+                                    val isAddHovered by addInteractionSource.collectIsHoveredAsState()
+                                    var isAddFocused by remember { mutableStateOf(false) }
+                                    val isAddFocusedOrHovered = isAddFocused || isAddHovered
+
+                                    val addScale by animateFloatAsState(
+                                        targetValue = if (isAddFocusedOrHovered) 1.05f else 1.0f,
+                                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                                        label = "add_scale"
+                                    )
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp)
+                                            .graphicsLayer {
+                                                scaleX = addScale
+                                                scaleY = addScale
+                                            }
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .hoverable(addInteractionSource)
+                                            .onFocusChanged { isAddFocused = it.isFocused }
+                                            .focusable()
+                                            .clickable(
+                                                interactionSource = addInteractionSource,
+                                                indication = null
+                                            ) { isInCreateMode = true }
+                                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(42.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (isAddFocusedOrHovered) Color.White.copy(alpha = 0.35f)
+                                                    else Color.White.copy(alpha = 0.18f)
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = "Adicionar Perfil",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(16.dp))
+
+                                        Text(
+                                            text = "Adicionar Perfil",
+                                            color = Color.White,
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
                         }
 
-                        // Ajuda
-                        val helpInteractionSource = remember { MutableInteractionSource() }
-                        val isHelpHovered by helpInteractionSource.collectIsHoveredAsState()
-                        var isHelpFocused by remember { mutableStateOf(false) }
-                        val isHelpFocusedOrHovered = isHelpFocused || isHelpHovered
-
-                        val helpScale by animateFloatAsState(
-                            targetValue = if (isHelpFocusedOrHovered) 1.15f else 1.0f,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                            label = "help_scale"
-                        )
-                        val helpTranslationY by animateDpAsState(
-                            targetValue = if (isHelpFocusedOrHovered) (-4).dp else 0.dp,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                            label = "help_jump"
-                        )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        // Right Side Column: Featured Movie/Series Title Logo & Description
+                        Column(
                             modifier = Modifier
-                                .graphicsLayer {
-                                    scaleX = helpScale
-                                    scaleY = helpScale
-                                    translationY = helpTranslationY.toPx()
-                                }
-                                .hoverable(helpInteractionSource)
-                                .onFocusChanged { isHelpFocused = it.isFocused }
-                                .focusable()
-                                .clickable(
-                                    interactionSource = helpInteractionSource,
-                                    indication = null
-                                ) { /* Decorative help */ }
-                                .padding(8.dp)
+                                .weight(1.1f)
+                                .fillMaxHeight()
+                                .padding(bottom = 28.dp),
+                            verticalArrangement = Arrangement.Bottom,
+                            horizontalAlignment = Alignment.End
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.HelpOutline,
-                                contentDescription = "Ajuda",
-                                tint = if (isHelpFocusedOrHovered) Color.White else Color.White.copy(alpha = 0.5f),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "AJUDA",
-                                color = if (isHelpFocusedOrHovered) Color.White else Color.White.copy(alpha = 0.5f),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.5.sp
-                            )
+                            Crossfade(
+                                targetState = currentFeaturedItem,
+                                animationSpec = tween(800),
+                                label = "profile_meta_crossfade"
+                            ) { featured ->
+                                if (featured != null) {
+                                    val titleLogoUrl = featured.getEffectiveTitleLogoUrl()
+                                    var isLogoFailed by remember(titleLogoUrl) { mutableStateOf(false) }
+
+                                    Column(
+                                        horizontalAlignment = Alignment.End,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        // Title Logo or Bold Title Text
+                                        if (!titleLogoUrl.isNullOrEmpty() && !isLogoFailed) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .height(95.dp)
+                                                    .widthIn(max = 400.dp),
+                                                contentAlignment = Alignment.BottomEnd
+                                            ) {
+                                                LogoAsyncImage(
+                                                    logoUrl = titleLogoUrl,
+                                                    contentDescription = featured.title,
+                                                    contentScale = ContentScale.Fit,
+                                                    alignment = Alignment.BottomEnd,
+                                                    modifier = Modifier.fillMaxHeight(),
+                                                    onState = { state ->
+                                                        if (state is coil.compose.AsyncImagePainter.State.Error) {
+                                                            isLogoFailed = true
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        } else {
+                                            Text(
+                                                text = featured.title.uppercase(),
+                                                fontSize = 38.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = Color.White,
+                                                textAlign = TextAlign.Right,
+                                                letterSpacing = 2.sp,
+                                                modifier = Modifier.widthIn(max = 420.dp)
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(14.dp))
+
+                                        val desc = featured.description?.takeIf { it.isNotBlank() }
+                                            ?: "Aproveite os melhores conteúdos, filmes, séries e canais ao vivo."
+
+                                        Text(
+                                            text = desc,
+                                            fontSize = 14.sp,
+                                            color = Color.White.copy(alpha = 0.82f),
+                                            textAlign = TextAlign.Right,
+                                            lineHeight = 20.sp,
+                                            maxLines = 3,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            modifier = Modifier.widthIn(max = 420.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

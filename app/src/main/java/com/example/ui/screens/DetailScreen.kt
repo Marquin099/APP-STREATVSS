@@ -673,7 +673,7 @@ fun DetailScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier.fillMaxSize()
                             ) {
-                                itemsIndexed(currentSeason.episodes, key = { index, ep -> if (ep.id.isNotEmpty()) ep.id else "${ep.episodeNumber}_$index" }) { index, ep ->
+                                itemsIndexed(currentSeason.episodes, key = { index, ep -> "${ep.title}_$index" }) { index, ep ->
                                     val epFocusRequester = episodeFocusRequesters.getOrNull(index)
                                     EpisodeItemRow(
                                         episode = ep,
@@ -772,7 +772,7 @@ fun DetailScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        itemsIndexed(seasons, key = { idx, season -> season.seasonNumber }) { idx, season ->
+                        itemsIndexed(seasons, key = { idx, season -> "${season.name}_$idx" }) { idx, season ->
                             SeasonSelectorItem(
                                 name = season.name,
                                 isSelected = idx == selectedSeasonIndex,

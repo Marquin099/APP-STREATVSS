@@ -5,6 +5,8 @@ import com.example.ui.components.getCleanPtBrTitle
 import com.example.ui.util.SharpenTransformation
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
@@ -63,7 +65,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,6 +97,7 @@ fun MainScreen(
     viewModel: IPTVViewModel
 ) {
     val selectedTab by viewModel.selectedTab.collectAsState()
+    val isCategoryLoading by viewModel.isCategoryLoading.collectAsState()
     val selectedProfile by viewModel.selectedProfile.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
 
@@ -302,85 +310,135 @@ fun MainScreen(
                         .fillMaxSize()
                         .padding(top = 64.dp)
                 )
-            } else if (selectedTab == "Canais") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 72.dp, bottom = 16.dp)
-                ) {
-                    LiveChannelsTabContent(
-                        groupedChannels = groupedChannels,
-                        categories = categories,
-                        contentFocusRequester = contentFocusRequester,
-                        navBarFocusRequester = navBarFocusRequester,
-                        onItemPlayOrDetail = onItemPlayOrDetail,
-                        onItemFocused = { item -> activeFocusedItem = item },
-                        viewModel = viewModel
-                    )
-                }
             } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(scrollState)
-                        .padding(bottom = 36.dp)
-                ) {
-                    Spacer(modifier = Modifier.height(72.dp))
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        val tabs = listOf("Inicio", "Canais", "Filmes", "Series", "Minha Lista")
+                        val initialIndex = tabs.indexOf(initialState)
+                        val targetIndex = tabs.indexOf(targetState)
+                        val movingRight = if (initialIndex != -1 && targetIndex != -1) targetIndex > initialIndex else true
 
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        when (selectedTab) {
-                            "Search" -> {
-                                SearchResultGrid(
-                                    movies = movies,
-                                    series = series,
-                                    channels = channels,
-                                    onPlay = onItemPlayOrDetail,
-                                    firstItemFocusRequester = contentFocusRequester
+                        val slideFraction = 0.08f
+                        val durationIn = 280
+                        val durationOut = 220
+
+                        if (movingRight) {
+                            (slideInHorizontally(
+                                animationSpec = tween(durationIn, easing = FastOutSlowInEasing),
+                                initialOffsetX = { fullWidth -> (fullWidth * slideFraction).toInt() }
+                            ) + fadeIn(
+                                animationSpec = tween(durationIn, easing = FastOutSlowInEasing)
+                            )).togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(durationOut, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { fullWidth -> (-fullWidth * slideFraction).toInt() }
+                                ) + fadeOut(
+                                    animationSpec = tween(durationOut, easing = FastOutSlowInEasing)
                                 )
-                            }
-                            "Inicio" -> {
-                                HomeTabContent(
-                                    viewModel = viewModel,
-                                    trendingItems = trendingItems,
-                                    popularItems = popularItems,
-                                    bannerIndex = bannerIndex,
-                                    onItemPlayOrDetail = onItemPlayOrDetail,
-                                    onContinueWatchingClick = onContinueWatchingClick,
-                                    onColorExtracted = { color -> currentBackgroundColor = color },
-                                    navBarFocusRequester = navBarFocusRequester,
-                                    contentFocusRequester = contentFocusRequester,
-                                    continueWatchingFirstItemFocusRequester = continueWatchingFirstItemFocusRequester,
-                                    trendingFirstItemFocusRequester = trendingFirstItemFocusRequester,
-                                    popularFirstItemFocusRequester = popularFirstItemFocusRequester
+                            )
+                        } else {
+                            (slideInHorizontally(
+                                animationSpec = tween(durationIn, easing = FastOutSlowInEasing),
+                                initialOffsetX = { fullWidth -> (-fullWidth * slideFraction).toInt() }
+                            ) + fadeIn(
+                                animationSpec = tween(durationIn, easing = FastOutSlowInEasing)
+                            )).togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(durationOut, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { fullWidth -> (fullWidth * slideFraction).toInt() }
+                                ) + fadeOut(
+                                    animationSpec = tween(durationOut, easing = FastOutSlowInEasing)
                                 )
-                            }
-                            "Minha Lista" -> {
-                                MyListTabContent(
-                                    viewModel = viewModel,
-                                    onItemPlayOrDetail = onItemPlayOrDetail,
-                                    contentFocusRequester = contentFocusRequester
-                                )
-                            }
-                            else -> {
-                                CategoryListTabContent(
-                                    targetState = selectedTab,
-                                    channels = channels,
-                                    movies = movies,
-                                    series = series,
-                                    groupedChannels = groupedChannels,
-                                    groupedMovies = groupedMovies,
-                                    groupedSeries = groupedSeries,
-                                    categories = categories,
-                                    focusedCategoryIndex = focusedCategoryIndex,
-                                    onFocusedCategoryIndexChange = { focusedCategoryIndex = it },
-                                    contentFocusRequester = contentFocusRequester,
-                                    navBarFocusRequester = navBarFocusRequester,
-                                    onItemPlayOrDetail = onItemPlayOrDetail,
-                                    onItemFocused = { item ->
-                                        activeFocusedItem = item
-                                    },
-                                    viewModel = viewModel
-                                )
+                            )
+                        }
+                    },
+                    label = "MainScreenTabTransition",
+                    modifier = Modifier.fillMaxSize()
+                ) { currentTab ->
+                    if (currentTab == "Canais") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = 72.dp, bottom = 16.dp)
+                        ) {
+                            LiveChannelsTabContent(
+                                groupedChannels = groupedChannels,
+                                categories = categories,
+                                contentFocusRequester = contentFocusRequester,
+                                navBarFocusRequester = navBarFocusRequester,
+                                onItemPlayOrDetail = onItemPlayOrDetail,
+                                onItemFocused = { item -> activeFocusedItem = item },
+                                viewModel = viewModel
+                            )
+                        }
+                    } else {
+                        val currentScrollState = if (currentTab == "Inicio") scrollState else remember(currentTab) { ScrollState(0) }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(currentScrollState)
+                                .padding(bottom = 36.dp)
+                        ) {
+                            Spacer(modifier = Modifier.height(72.dp))
+
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                when (currentTab) {
+                                    "Search" -> {
+                                        SearchResultGrid(
+                                            movies = movies,
+                                            series = series,
+                                            channels = channels,
+                                            onPlay = onItemPlayOrDetail,
+                                            firstItemFocusRequester = contentFocusRequester
+                                        )
+                                    }
+                                    "Inicio" -> {
+                                        HomeTabContent(
+                                            viewModel = viewModel,
+                                            trendingItems = trendingItems,
+                                            popularItems = popularItems,
+                                            bannerIndex = bannerIndex,
+                                            onItemPlayOrDetail = onItemPlayOrDetail,
+                                            onContinueWatchingClick = onContinueWatchingClick,
+                                            onColorExtracted = { color -> currentBackgroundColor = color },
+                                            navBarFocusRequester = navBarFocusRequester,
+                                            contentFocusRequester = contentFocusRequester,
+                                            continueWatchingFirstItemFocusRequester = continueWatchingFirstItemFocusRequester,
+                                            trendingFirstItemFocusRequester = trendingFirstItemFocusRequester,
+                                            popularFirstItemFocusRequester = popularFirstItemFocusRequester
+                                        )
+                                    }
+                                    "Minha Lista" -> {
+                                        MyListTabContent(
+                                            viewModel = viewModel,
+                                            onItemPlayOrDetail = onItemPlayOrDetail,
+                                            contentFocusRequester = contentFocusRequester
+                                        )
+                                    }
+                                    else -> {
+                                        CategoryListTabContent(
+                                            targetState = currentTab,
+                                            channels = channels,
+                                            movies = movies,
+                                            series = series,
+                                            groupedChannels = groupedChannels,
+                                            groupedMovies = groupedMovies,
+                                            groupedSeries = groupedSeries,
+                                            categories = categories,
+                                            focusedCategoryIndex = focusedCategoryIndex,
+                                            onFocusedCategoryIndexChange = { focusedCategoryIndex = it },
+                                            contentFocusRequester = contentFocusRequester,
+                                            navBarFocusRequester = navBarFocusRequester,
+                                            onItemPlayOrDetail = onItemPlayOrDetail,
+                                            onItemFocused = { item ->
+                                                activeFocusedItem = item
+                                            },
+                                            isLoading = isCategoryLoading,
+                                            viewModel = viewModel
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -402,14 +460,6 @@ fun MainScreen(
                 viewModel.updateSearchQuery("")
                 viewModel.lastClickedItemId = null
                 focusedCategoryIndex = 0
-                scope.launch {
-                    delay(100)
-                    try {
-                        contentFocusRequester.requestFocus()
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
             },
             onSearchClick = {
                 if (isSearchActive) {
@@ -470,11 +520,10 @@ private fun MainScreenFullBackground(
                 val bgRequest = remember(currentBgUrl) {
                     ImageRequest.Builder(context)
                         .data(currentBgUrl)
-                        .crossfade(true)
-                        .bitmapConfig(Bitmap.Config.ARGB_8888)
+                        .size(width = 480, height = 270) // Optimized low-res backdrop for fast hardware rendering without GPU strain
+                        .bitmapConfig(Bitmap.Config.RGB_565) // 50% RAM savings for backdrop textures
                         .memoryCachePolicy(CachePolicy.ENABLED)
                         .diskCachePolicy(CachePolicy.ENABLED)
-                        .allowHardware(false)
                         .build()
                 }
                 AsyncImage(
@@ -483,8 +532,7 @@ private fun MainScreenFullBackground(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
-                        .blur(10.dp)
-                        .graphicsLayer { alpha = 0.75f }
+                        .graphicsLayer { alpha = 0.65f }
                 )
                 Box(
                     modifier = Modifier
@@ -492,9 +540,9 @@ private fun MainScreenFullBackground(
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color.Black.copy(alpha = 0.25f),
-                                    Color.Black.copy(alpha = 0.50f),
-                                    Color.Black.copy(alpha = 0.85f)
+                                    Color.Black.copy(alpha = 0.35f),
+                                    Color.Black.copy(alpha = 0.65f),
+                                    Color.Black.copy(alpha = 0.90f)
                                 )
                             )
                         )
@@ -605,7 +653,7 @@ private fun HomeTabContent(
                     onPlay = onItemPlayOrDetail,
                     firstItemFocusRequester = popularFirstItemFocusRequester
                 )
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(80.dp))
             }
         }
     } else {
@@ -690,7 +738,7 @@ private fun LiveChannelsTabContent(
                 navBarFocusRequester.requestFocus()
             }
         } catch (e: Exception) {
-            android.util.Log.e("LiveChannels", "Failed to focus top nav bar", e)
+            android.util.Log.w("LiveChannels", "Failed to focus top nav bar: ${e.message}")
         }
     }
 
@@ -1158,6 +1206,7 @@ private fun CategoryListTabContent(
     navBarFocusRequester: FocusRequester,
     onItemPlayOrDetail: (PlaylistItem) -> Unit,
     onItemFocused: (PlaylistItem) -> Unit,
+    isLoading: Boolean = false,
     viewModel: IPTVViewModel
 ) {
     val itemsSource = when (targetState) {
@@ -1175,18 +1224,13 @@ private fun CategoryListTabContent(
 
     val hasItems = itemsSource.isNotEmpty() || groupedSource.values.any { it.isNotEmpty() }
 
-    if (hasItems) {
-        LaunchedEffect(targetState, focusedCategoryIndex) {
-            if ((targetState == "Filmes" || targetState == "Series") && viewModel.lastClickedItemId == null) {
-                delay(150)
-                try {
-                    contentFocusRequester.requestFocus()
-                } catch (e: Exception) {
-                    android.util.Log.e("MainScreen", "Failed to focus new category row", e)
-                }
-            }
+    LaunchedEffect(targetState, itemsSource) {
+        if ((targetState == "Filmes" || targetState == "Series") && itemsSource.isNotEmpty()) {
+            viewModel.preloadCategoryItems(itemsSource)
         }
+    }
 
+    if (hasItems) {
         if (targetState == "Filmes" || targetState == "Series") {
             val availableCategories = remember(categories, groupedSource) {
                 val filtered = categories.filter { cat -> (groupedSource[cat]?.isNotEmpty() == true) }
@@ -1202,7 +1246,9 @@ private fun CategoryListTabContent(
                     ?: emptyList()
             }
 
-            if (catItems.isNotEmpty()) {
+            if (isLoading) {
+                MoviesSeriesSkeletonLoader(categoryTitle = activeCategory)
+            } else if (catItems.isNotEmpty()) {
                 MoviesSeriesCategoryRow(
                     categoryTitle = activeCategory,
                     items = catItems,
@@ -1371,7 +1417,9 @@ private fun MainScreenTopBar(
     }
 }
 
-@Composable
+private data class TabBounds(val x: Float, val y: Float, val width: Float, val height: Float)
+
+@Composable  
 private fun TopNavBarTabs(
     selectedTab: String,
     navBarFocusRequester: FocusRequester,
@@ -1379,52 +1427,127 @@ private fun TopNavBarTabs(
     onTabSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-        modifier = modifier
-    ) {
-        val tabs = listOf("Inicio", "Canais", "Filmes", "Series", "Minha Lista")
-        tabs.forEach { tab ->
-            var isTabFocused by remember { mutableStateOf(false) }
-            val isSelected = selectedTab == tab
+    val tabs = remember { listOf("Inicio", "Canais", "Filmes", "Series", "Minha Lista") }
+    val viewModel = LocalIPTVViewModel.current
 
+    // Armazena as coordenadas do container e de cada item para animar a pill vermelha
+    var containerCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val tabCoordinatesMap = remember { mutableStateMapOf<String, LayoutCoordinates>() }
+
+    // Calcula a posição da aba selecionada
+    val currentBounds = remember(selectedTab, containerCoordinates, tabCoordinatesMap[selectedTab]) {
+        val parent = containerCoordinates
+        val child = tabCoordinatesMap[selectedTab]
+        if (parent != null && child != null && parent.isAttached && child.isAttached) {
+            val pos = parent.localPositionOf(child, Offset.Zero)
+            TabBounds(pos.x, pos.y, child.size.width.toFloat(), child.size.height.toFloat())
+        } else null
+    }
+
+    // Animadores para deslocamento x, y, largura e altura
+    val animX = remember { Animatable(0f) }
+    val animY = remember { Animatable(0f) }
+    val animWidth = remember { Animatable(0f) }
+    val animHeight = remember { Animatable(0f) }
+    var hasInitialized by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentBounds) {
+        currentBounds?.let { bounds ->
+            if (bounds.width > 0f && bounds.height > 0f) {
+                if (!hasInitialized) {
+                    animX.snapTo(bounds.x)
+                    animY.snapTo(bounds.y)
+                    animWidth.snapTo(bounds.width)
+                    animHeight.snapTo(bounds.height)
+                    hasInitialized = true
+                } else {
+                    val spec = spring<Float>(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                    launch { animX.animateTo(bounds.x, spec) }
+                    launch { animY.animateTo(bounds.y, spec) }
+                    launch { animWidth.animateTo(bounds.width, spec) }
+                    launch { animHeight.animateTo(bounds.height, spec) }
+                }
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Color(0xFF141414).copy(alpha = 0.85f))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+            .padding(horizontal = 4.dp, vertical = 2.dp)
+            .onGloballyPositioned { containerCoordinates = it },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        // Cápsula vermelha deslizante no fundo da aba ativa
+        if (hasInitialized && animWidth.value > 0f && animHeight.value > 0f) {
+            val density = LocalDensity.current
             Box(
                 modifier = Modifier
-                    .padding(horizontal = 8.dp)
-                    .clip(MaterialTheme.shapes.extraLarge)
-                    .background(
-                        if (isSelected) Color(0xFFE50914)
-                        else if (isTabFocused) Color.White.copy(alpha = 0.1f)
-                        else Color.Transparent
+                    .offset { IntOffset(animX.value.roundToInt(), animY.value.roundToInt()) }
+                    .size(
+                        width = with(density) { animWidth.value.toDp() },
+                        height = with(density) { animHeight.value.toDp() }
                     )
-                    .border(
-                        width = if (isTabFocused) 2.dp else 0.dp,
-                        color = if (isTabFocused) Color.White else Color.Transparent,
-                        shape = MaterialTheme.shapes.extraLarge
-                    )
-                    .clickable { onTabSelected(tab) }
-                    .onFocusChanged { isTabFocused = it.isFocused }
-                    .onPreviewKeyEvent { keyEvent ->
-                        if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
-                            try {
-                                contentFocusRequester.requestFocus()
-                                true
-                            } catch (e: Exception) {
-                                false
+                    .clip(CircleShape)
+                    .background(Color(0xFFE50914))
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            tabs.forEach { tab ->
+                val isSelected = selectedTab == tab
+                val tabFocusRequester = remember(tab) { FocusRequester() }
+
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .onGloballyPositioned { coords ->
+                            tabCoordinatesMap[tab] = coords
+                        }
+                        .focusRequester(if (isSelected) navBarFocusRequester else tabFocusRequester)
+                        .clip(CircleShape)
+                        // Sem fundo cinza no foco: o próprio fundo vermelho da pill desliza até aqui
+                        .background(
+                            if (!hasInitialized && isSelected) Color(0xFFE50914)
+                            else Color.Transparent
+                        )
+                        .onFocusChanged { focusState ->
+                            // ESTRELA DO COMPORTAMENTO NETFLIX:
+                            // Ao receber o foco das setas do controle remoto, seleciona a aba imediatamente (apenas se não estiver restaurando foco de um card clicado)
+                            if (focusState.isFocused && selectedTab != tab && viewModel?.lastClickedItemId == null) {
+                                onTabSelected(tab)
                             }
-                        } else false
-                    }
-                    .focusRequester(if (isSelected) navBarFocusRequester else remember { FocusRequester() })
-                    .focusable()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = tab,
-                    color = if (isSelected || isTabFocused) Color.White else Color.LightGray,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    fontSize = 14.sp
-                )
+                        }
+                        .onPreviewKeyEvent { keyEvent ->
+                            // Navegação ao pressionar para baixo (muda para o conteúdo principal)
+                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
+                                try {
+                                    contentFocusRequester.requestFocus()
+                                    true
+                                } catch (e: Exception) {
+                                    false
+                                }
+                            } else false
+                        }
+                        .clickable { onTabSelected(tab) }
+                        .focusable()
+                        .padding(horizontal = 18.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = tab,
+                        color = if (isSelected) Color.White else Color.LightGray.copy(alpha = 0.7f),
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
+                }
             }
         }
     }
@@ -1753,8 +1876,10 @@ fun FeaturedHeroBanner(
                         bottom = 0f
                     )
                 )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Expected when scope leaves composition or focus shifts
             } catch (e: Exception) {
-                android.util.Log.e("FeaturedHeroBanner", "Failed to bring banner into view", e)
+                // Ignore transient layout errors
             }
         }
     }
@@ -1786,30 +1911,14 @@ fun FeaturedHeroBanner(
             .height(460.dp) // Made significantly larger and cinematic as requested!
             .padding(horizontal = 24.dp, vertical = 12.dp)
             .bringIntoViewRequester(bringIntoViewRequester)
-            .scale(bannerScale)
             .graphicsLayer {
+                scaleX = bannerScale
+                scaleY = bannerScale
                 translationY = bannerTranslationY * density
             }
             .clip(RoundedCornerShape(12.dp))
             .onFocusChanged {
                 isBannerFocused = it.isFocused
-                if (it.isFocused) {
-                    coroutineScope.launch {
-                        try {
-                            val topOffset = with(localDensity) { -120.dp.toPx() }
-                            bringIntoViewRequester.bringIntoView(
-                                androidx.compose.ui.geometry.Rect(
-                                    left = 0f,
-                                    top = topOffset,
-                                    right = 0f,
-                                    bottom = 0f
-                                )
-                            )
-                        } catch (e: Exception) {
-                            android.util.Log.e("FeaturedHeroBanner", "Failed to bring banner into view on focus changed", e)
-                        }
-                    }
-                }
             }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -1901,8 +2010,7 @@ fun FeaturedHeroBanner(
                         val backdropRequest = remember(effectiveBackdrop) {
                             ImageRequest.Builder(context)
                                 .data(effectiveBackdrop)
-                                .crossfade(true)
-                                .size(width = 1920, height = 1080) // Downscale to standard cinematic viewport to prevent glGetError texture overflow
+                                .size(width = 1280, height = 720) // Optimized size for hero banner without texture memory overflow
                                 .bitmapConfig(Bitmap.Config.ARGB_8888)
                                 .memoryCachePolicy(CachePolicy.ENABLED)
                                 .diskCachePolicy(CachePolicy.ENABLED)
@@ -1942,8 +2050,18 @@ fun FeaturedHeroBanner(
                             modifier = Modifier.fillMaxSize(),
                             onState = { state ->
                                 if (state is AsyncImagePainter.State.Error) {
-                                    isBackdropError = true
-                                    android.util.Log.e("HeroBanner", "Failed to load backdrop: $effectiveBackdrop, hiding image to prevent OpenGL texture crash.", state.result.throwable)
+                                    val throwable = state.result.throwable
+                                    val isCancellation = throwable is kotlinx.coroutines.CancellationException ||
+                                            throwable is java.io.InterruptedIOException ||
+                                            (throwable is IllegalStateException && throwable.message?.contains("closed", ignoreCase = true) == true) ||
+                                            (throwable is java.io.IOException && (
+                                                throwable.message?.contains("Canceled", ignoreCase = true) == true ||
+                                                throwable.message?.contains("Socket closed", ignoreCase = true) == true
+                                            ))
+                                    if (!isCancellation) {
+                                        isBackdropError = true
+                                        android.util.Log.w("HeroBanner", "Failed to load backdrop: $effectiveBackdrop, hiding image to prevent OpenGL texture crash: ${throwable.message}")
+                                    }
                                 }
                             }
                         )
@@ -2191,11 +2309,21 @@ fun FeaturedHeroBanner(
                                             isLogoLoaded = true
                                         }
                                         if (state is AsyncImagePainter.State.Error) {
-                                            android.util.Log.e("HeroBanner", "Failed to load logo: $titleLogo for ${currentItem.title}", state.result.throwable)
-                                            if (currentLogoIndex < titleLogoCandidates.lastIndex) {
-                                                currentLogoIndex++
-                                            } else {
-                                                isLogoLoadingError = true
+                                            val throwable = state.result.throwable
+                                            val isCancellation = throwable is kotlinx.coroutines.CancellationException ||
+                                                    throwable is java.io.InterruptedIOException ||
+                                                    (throwable is IllegalStateException && throwable.message?.contains("closed", ignoreCase = true) == true) ||
+                                                    (throwable is java.io.IOException && (
+                                                        throwable.message?.contains("Canceled", ignoreCase = true) == true ||
+                                                        throwable.message?.contains("Socket closed", ignoreCase = true) == true
+                                                    ))
+                                            if (!isCancellation) {
+                                                android.util.Log.w("HeroBanner", "Failed to load logo: $titleLogo for ${currentItem.title}: ${throwable.message}")
+                                                if (currentLogoIndex < titleLogoCandidates.lastIndex) {
+                                                    currentLogoIndex++
+                                                } else {
+                                                    isLogoLoadingError = true
+                                                }
                                             }
                                         }
                                     }
@@ -2284,6 +2412,33 @@ fun FeaturedHeroBanner(
                                         blurRadius = 3f
                                     )
                                 )
+                            )
+                        }
+                    }
+
+                    // Aviso no canto inferior direito do cartão flutuante (estilo Netflix: Em alta no Brasil)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 24.dp, bottom = 24.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF141414).copy(alpha = 0.75f))
+                            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "🔥",
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = "Em alta no Brasil",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -2660,12 +2815,6 @@ fun MoviesSeriesCategoryRow(
         mutableStateOf(if (idx >= 0) idx else 0)
     }
 
-    LaunchedEffect(categoryTitle, items) {
-        if (viewModel?.lastClickedItemId != null) {
-            viewModel?.lastClickedItemId = null
-        }
-    }
-
     val safeIndex = focusedItemIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
     val currentItem = items.getOrNull(safeIndex) ?: items.firstOrNull()
 
@@ -2689,17 +2838,39 @@ fun MoviesSeriesCategoryRow(
 
     val slot0FocusRequester = remember { FocusRequester() }
     val slot1FocusRequester = remember { FocusRequester() }
+    var isRowInteracted by remember { mutableStateOf(false) }
 
+    // Restore focus to last clicked item on back navigation
+    LaunchedEffect(categoryTitle, items) {
+        val lastId = viewModel?.lastClickedItemId
+        if (lastId != null) {
+            val idx = items.indexOfFirst { it.id == lastId }
+            if (idx >= 0) {
+                focusedItemIndex = idx
+                isRowInteracted = true
+                val slot = idx % 2
+                delay(60)
+                try {
+                    if (slot == 0) {
+                        slot0FocusRequester.requestFocus()
+                    } else {
+                        slot1FocusRequester.requestFocus()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            viewModel?.lastClickedItemId = null
+        }
+    }
+
+    // Switch focus between slots on arrow navigation without delay
     LaunchedEffect(safeIndex) {
+        if (!isRowInteracted) return@LaunchedEffect
         val slot = safeIndex % 2
-        delay(50)
         try {
             if (slot == 0) {
-                if (firstItemFocusRequester != null && pageStartIndex == 0) {
-                    firstItemFocusRequester.requestFocus()
-                } else {
-                    slot0FocusRequester.requestFocus()
-                }
+                slot0FocusRequester.requestFocus()
             } else {
                 slot1FocusRequester.requestFocus()
             }
@@ -2738,33 +2909,35 @@ fun MoviesSeriesCategoryRow(
                 visibleItems.forEachIndexed { relativeIdx, item ->
                     val absoluteIdx = pageStartIndex + relativeIdx
                     val isFocused = (absoluteIdx == safeIndex)
-                    val cardRequester = if (relativeIdx == 0) {
-                        if (pageStartIndex == 0 && firstItemFocusRequester != null) firstItemFocusRequester else slot0FocusRequester
-                    } else slot1FocusRequester
+                    val cardRequester = if (relativeIdx == 0) slot0FocusRequester else slot1FocusRequester
 
-                    MovieSeriesCardItem(
-                        item = item,
-                        isFocused = isFocused,
-                        cardWidth = cardWidth,
-                        cardHeight = cardHeight,
-                        focusRequester = cardRequester,
-                        onClick = { onPlay(item) },
-                        onFocusGained = {
-                            focusedItemIndex = absoluteIdx
-                        },
-                        onKeyLeft = {
-                            if (safeIndex > 0) {
-                                focusedItemIndex = safeIndex - 1
-                            }
-                        },
-                        onKeyRight = {
-                            if (safeIndex < items.size - 1) {
-                                focusedItemIndex = safeIndex + 1
-                            }
-                        },
-                        onKeyUp = { onUpPressed() },
-                        onKeyDown = { onDownPressed() }
-                    )
+                    key(item.id) {
+                        MovieSeriesCardItem(
+                            item = item,
+                            isFocused = isFocused,
+                            cardWidth = cardWidth,
+                            cardHeight = cardHeight,
+                            focusRequester = cardRequester,
+                            firstItemFocusRequester = if (relativeIdx == 0 && pageStartIndex == 0) firstItemFocusRequester else null,
+                            onClick = { onPlay(item) },
+                            onFocusGained = {
+                                isRowInteracted = true
+                                focusedItemIndex = absoluteIdx
+                            },
+                            onKeyLeft = {
+                                if (safeIndex > 0) {
+                                    focusedItemIndex = safeIndex - 1
+                                }
+                            },
+                            onKeyRight = {
+                                if (safeIndex < items.size - 1) {
+                                    focusedItemIndex = safeIndex + 1
+                                }
+                            },
+                            onKeyUp = { onUpPressed() },
+                            onKeyDown = { onDownPressed() }
+                        )
+                    }
                 }
             }
         }
@@ -2843,6 +3016,7 @@ fun MovieSeriesCardItem(
     cardWidth: androidx.compose.ui.unit.Dp,
     cardHeight: androidx.compose.ui.unit.Dp,
     focusRequester: FocusRequester,
+    firstItemFocusRequester: FocusRequester? = null,
     onClick: () -> Unit,
     onFocusGained: () -> Unit,
     onKeyLeft: () -> Unit,
@@ -2869,7 +3043,10 @@ fun MovieSeriesCardItem(
         modifier = Modifier
             .width(cardWidth)
             .height(cardHeight)
-            .scale(scale)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFF181818))
             .border(
@@ -2877,7 +3054,10 @@ fun MovieSeriesCardItem(
                 color = if (isFocused) Color.White else Color.Transparent,
                 shape = RoundedCornerShape(12.dp)
             )
-            .focusable()
+            .then(
+                if (firstItemFocusRequester != null) Modifier.focusRequester(firstItemFocusRequester)
+                else Modifier
+            )
             .focusRequester(focusRequester)
             .onFocusChanged {
                 if (it.isFocused) {
@@ -2904,7 +3084,7 @@ fun MovieSeriesCardItem(
                             onKeyDown()
                             true
                         }
-                        Key.DirectionCenter, Key.Enter -> {
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                             onClick()
                             true
                         }
@@ -2929,9 +3109,7 @@ fun MovieSeriesCardItem(
             val imageRequest = remember(effectiveBackdrop) {
                 ImageRequest.Builder(context)
                     .data(effectiveBackdrop)
-                    .crossfade(true)
-                    .transformations(SharpenTransformation(0.28f))
-                    .bitmapConfig(Bitmap.Config.ARGB_8888)
+                    .bitmapConfig(Bitmap.Config.RGB_565)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
                     .build()
@@ -3252,9 +3430,7 @@ fun MovieCard(
                     val cardRequest = remember(effectiveBackdrop) {
                         ImageRequest.Builder(context)
                             .data(effectiveBackdrop)
-                            .crossfade(true)
-                            .transformations(SharpenTransformation(0.28f))
-                            .bitmapConfig(Bitmap.Config.ARGB_8888)
+                            .bitmapConfig(Bitmap.Config.RGB_565)
                             .memoryCachePolicy(CachePolicy.ENABLED)
                             .diskCachePolicy(CachePolicy.ENABLED)
                             .build()
@@ -3398,6 +3574,7 @@ fun ContinueWatchingRowSection(
 }
 
 // Continue Watching Card with Horizontal (Deitado) Layout, containing a Vertical Poster on the left, logo/details on the right, and remaining progress time.
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ContinueWatchingCard(
     item: PlaylistItem,
@@ -3409,11 +3586,19 @@ fun ContinueWatchingCard(
     val isFocusedState = remember { derivedStateOf { isFocused } }
     var progressFraction by remember { mutableStateOf(0f) }
     var elapsedText by remember { mutableStateOf("") }
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         if (viewModel.lastClickedItemId == item.id) {
             focusRequester.requestFocus()
             viewModel.lastClickedItemId = null
+            coroutineScope.launch {
+                delay(50)
+                try {
+                    bringIntoViewRequester.bringIntoView()
+                } catch (e: Exception) {}
+            }
         }
     }
 
@@ -3443,6 +3628,7 @@ fun ContinueWatchingCard(
 
     Card(
         modifier = Modifier
+            .bringIntoViewRequester(bringIntoViewRequester)
             .focusRequester(focusRequester)
             .width(260.dp)
             .height(135.dp)
@@ -3451,7 +3637,16 @@ fun ContinueWatchingCard(
                 scaleX = cardScale
                 scaleY = cardScale
             }
-            .onFocusChanged { isFocused = it.isFocused }
+            .onFocusChanged { focusState ->
+                isFocused = focusState.isFocused
+                if (focusState.isFocused) {
+                    coroutineScope.launch {
+                        try {
+                            bringIntoViewRequester.bringIntoView()
+                        } catch (e: Exception) {}
+                    }
+                }
+            }
             .focusable()
             .clickable { onClick() }
             .border(
@@ -3484,10 +3679,8 @@ fun ContinueWatchingCard(
                         val posterRequest = remember(effectiveLogo) {
                             ImageRequest.Builder(context)
                                 .data(effectiveLogo)
-                                .crossfade(true)
                                 .size(width = 240, height = 360)
-                                .transformations(SharpenTransformation(0.28f))
-                                .bitmapConfig(Bitmap.Config.ARGB_8888)
+                                .bitmapConfig(Bitmap.Config.RGB_565)
                                 .memoryCachePolicy(CachePolicy.ENABLED)
                                 .diskCachePolicy(CachePolicy.ENABLED)
                                 .build()
@@ -4041,6 +4234,7 @@ fun LatestTrailersSection(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TMDBTrailerCard(
     item: PlaylistItem,
@@ -4049,6 +4243,8 @@ fun TMDBTrailerCard(
 ) {
     val viewModel = LocalIPTVViewModel.current
     val localFocusRequester = remember { FocusRequester() }
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val coroutineScope = rememberCoroutineScope()
 
     var isFocused by remember { mutableStateOf(false) }
     val isFocusedState = remember { derivedStateOf { isFocused } }
@@ -4057,6 +4253,12 @@ fun TMDBTrailerCard(
         if (viewModel != null && viewModel.lastClickedItemId == item.id) {
             localFocusRequester.requestFocus()
             viewModel.lastClickedItemId = null
+            coroutineScope.launch {
+                delay(50)
+                try {
+                    bringIntoViewRequester.bringIntoView()
+                } catch (e: Exception) {}
+            }
         }
     }
 
@@ -4068,9 +4270,19 @@ fun TMDBTrailerCard(
 
     Column(
         modifier = modifier
+            .bringIntoViewRequester(bringIntoViewRequester)
             .focusRequester(localFocusRequester)
             .width(220.dp)
-            .onFocusChanged { isFocused = it.isFocused }
+            .onFocusChanged { focusState ->
+                isFocused = focusState.isFocused
+                if (focusState.isFocused) {
+                    coroutineScope.launch {
+                        try {
+                            bringIntoViewRequester.bringIntoView()
+                        } catch (e: Exception) {}
+                    }
+                }
+            }
             .focusable()
             .clickable { onClick() }
             .padding(4.dp)
@@ -4098,10 +4310,8 @@ fun TMDBTrailerCard(
                     val trailerRequest = remember(effectiveBackdrop) {
                         ImageRequest.Builder(context)
                             .data(effectiveBackdrop)
-                            .crossfade(true)
-                            .size(width = 440, height = 248) // Proportional safe size for trailer card
-                            .transformations(SharpenTransformation(0.28f))
-                            .bitmapConfig(Bitmap.Config.ARGB_8888)
+                            .size(width = 440, height = 248)
+                            .bitmapConfig(Bitmap.Config.RGB_565)
                             .memoryCachePolicy(CachePolicy.ENABLED)
                             .diskCachePolicy(CachePolicy.ENABLED)
                             .build()
@@ -4311,6 +4521,7 @@ fun MostPopularSection(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TMDBPosterCard(
     item: PlaylistItem,
@@ -4319,6 +4530,8 @@ fun TMDBPosterCard(
 ) {
     val viewModel = LocalIPTVViewModel.current
     val localFocusRequester = remember { FocusRequester() }
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val coroutineScope = rememberCoroutineScope()
 
     var isFocused by remember { mutableStateOf(false) }
     val isFocusedState = remember { derivedStateOf { isFocused } }
@@ -4327,6 +4540,12 @@ fun TMDBPosterCard(
         if (viewModel != null && viewModel.lastClickedItemId == item.id) {
             localFocusRequester.requestFocus()
             viewModel.lastClickedItemId = null
+            coroutineScope.launch {
+                delay(50)
+                try {
+                    bringIntoViewRequester.bringIntoView()
+                } catch (e: Exception) {}
+            }
         }
     }
 
@@ -4338,9 +4557,19 @@ fun TMDBPosterCard(
 
     Column(
         modifier = modifier
+            .bringIntoViewRequester(bringIntoViewRequester)
             .focusRequester(localFocusRequester)
             .width(115.dp)
-            .onFocusChanged { isFocused = it.isFocused }
+            .onFocusChanged { focusState ->
+                isFocused = focusState.isFocused
+                if (focusState.isFocused) {
+                    coroutineScope.launch {
+                        try {
+                            bringIntoViewRequester.bringIntoView()
+                        } catch (e: Exception) {}
+                    }
+                }
+            }
             .focusable()
             .clickable { onClick() }
             .padding(4.dp)
@@ -4372,10 +4601,8 @@ fun TMDBPosterCard(
                     val posterRequest = remember(effectiveLogo) {
                         ImageRequest.Builder(context)
                             .data(effectiveLogo)
-                            .crossfade(true)
                             .size(width = 240, height = 360)
-                            .transformations(SharpenTransformation(0.28f))
-                            .bitmapConfig(Bitmap.Config.ARGB_8888)
+                            .bitmapConfig(Bitmap.Config.RGB_565)
                             .memoryCachePolicy(CachePolicy.ENABLED)
                             .diskCachePolicy(CachePolicy.ENABLED)
                             .build()
@@ -4564,7 +4791,7 @@ fun PlaylistItem.getEffectiveTitleLogoUrl(): String? {
         title.contains("Odisseia", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/jpLOFTHacWoxCTCLRePVlLHxrbo.png"
         title.contains("Perder", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/3pzH42BKQ0z30fM9DPwSewvWYLS.png"
         title.contains("Backrooms", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/oHP5aXQ4gg15t9EsBhgKENeCKdG.png"
-        title.contains("Rua", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/8VDfGY16827yyWH0R8itxLtfgK1.png"
+        title.contains("Rua", ignoreCase = true) || title.contains("Oak Street", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/e0HtKXHvWKFiYmzP3G8xLo7jo5B.png"
         title.contains("Hope", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/iEYvlw4yqSp9Ck6Iz90V31QSD7D.png"
         title.contains("Jackass", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/zdzXhbQgjOQzrQ6Yq5kWepYw7MJ.png"
         title.contains("Cinzenta", ignoreCase = true) -> "https://image.tmdb.org/t/p/original/9w0aK6Vs1YqSp13EhrlZVQ4TJ1u.png"
@@ -4581,7 +4808,7 @@ fun String.toOriginalTmdbUrl(): String {
     if (this.contains("image.tmdb.org/t/p/")) {
         val filename = this.substringAfterLast("/")
         if (filename.isNotEmpty()) {
-            return "https://image.tmdb.org/t/p/original/$filename"
+            return "https://image.tmdb.org/t/p/w1280/$filename"
         }
     }
     return this
@@ -4867,7 +5094,13 @@ fun MyListTabContent(
                 }
             }
         } else {
-            val gridState = rememberLazyGridState()
+            val clickedIndex = remember(filteredItems, viewModel.lastClickedItemId) {
+                if (viewModel.lastClickedItemId != null) {
+                    filteredItems.indexOfFirst { it.id == viewModel.lastClickedItemId }
+                } else -1
+            }
+            val initialIndex = if (clickedIndex >= 0) clickedIndex else 0
+            val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = initialIndex)
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 120.dp),
                 state = gridState,
@@ -4893,3 +5126,74 @@ fun MyListTabContent(
         }
     }
 }
+
+@Composable
+fun MoviesSeriesSkeletonLoader(
+    categoryTitle: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .width(200.dp)
+                .height(28.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xFF2A2A2A),
+                            Color(0xFF3A3A3A),
+                            Color(0xFF2A2A2A)
+                        )
+                    )
+                )
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            repeat(2) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(280.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    Color(0xFF2A2A2A),
+                                    Color(0xFF3A3A3A),
+                                    Color(0xFF2A2A2A)
+                                )
+                            )
+                        )
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .height(20.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color(0xFF2A2A2A))
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        repeat(3) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.9f)
+                    .height(14.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF2A2A2A))
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+        }
+    }
+}
+

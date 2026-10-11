@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -573,8 +574,7 @@ fun PosterCard(
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(effectiveLogo)
-                        .crossfade(true)
-                        .transformations(com.example.ui.util.SharpenTransformation(0.28f))
+                        .bitmapConfig(Bitmap.Config.RGB_565)
                         .build(),
                     contentDescription = item.getCleanPtBrTitle(),
                     contentScale = ContentScale.Crop,

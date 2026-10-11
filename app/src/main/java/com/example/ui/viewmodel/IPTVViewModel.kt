@@ -145,7 +145,7 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
 
     // Live Channels Flow
     val channels: StateFlow<List<PlaylistItem>> = repository.getItemsByType("live")
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val groupedChannels: StateFlow<Map<String, List<PlaylistItem>>> = combine(
         channels,
@@ -163,7 +163,7 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
         resultMap
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     // Movies Flow (Only show provider's films by filtering out TMDB-specific group names and live channels/categories)
     val movies: StateFlow<List<PlaylistItem>> = repository.getItemsByType("movie")
@@ -173,7 +173,7 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         .flowOn(Dispatchers.IO)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val groupedMovies: StateFlow<Map<String, List<PlaylistItem>>> = combine(movies, repository.getCategoriesByType("movie")) { movieList, catList ->
         val groups = movieList.groupBy { it.groupName }
@@ -190,7 +190,7 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
         resultMap
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     // Series Flow (Only show provider's series by filtering out TMDB-specific group names and live channels/categories)
     val series: StateFlow<List<PlaylistItem>> = combine(
@@ -204,7 +204,7 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
         groupSeriesList(filtered)
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val groupedSeries: StateFlow<Map<String, List<PlaylistItem>>> = combine(
         series,
@@ -225,7 +225,7 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
         resultMap
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     val filteredMovies: StateFlow<List<PlaylistItem>> = combine(movies, searchQuery) { list, query ->
         if (query.isBlank()) list else {
@@ -233,7 +233,7 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val filteredSeries: StateFlow<List<PlaylistItem>> = combine(series, searchQuery) { list, query ->
         if (query.isBlank()) list else {
@@ -241,7 +241,7 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val filteredChannels: StateFlow<List<PlaylistItem>> = combine(channels, searchQuery) { list, query ->
         if (query.isBlank()) list else {
@@ -249,7 +249,7 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val tmdbSuggestions: StateFlow<List<PlaylistItem>> = searchQuery
@@ -421,32 +421,28 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Trigger intelligent parallel background metadata prefetch on startup
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                if (repository.hasLoggedIn()) {
-                    repository.startBackgroundMetadataPrefetch()
-                }
-            } catch (e: Exception) {
-                Log.e("IPTVViewModel", "Failed to start background metadata prefetch", e)
-            }
-        }
     }
 
     fun syncNewContentOnStartup(onComplete: () -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
+            val completed = java.util.concurrent.atomic.AtomicBoolean(false)
+            fun notifyComplete() {
+                if (completed.compareAndSet(false, true)) {
+                    viewModelScope.launch(Dispatchers.Main) {
+                        onComplete()
+                    }
+                }
+            }
+
             try {
                 if (repository.hasLoggedIn()) {
                     val count = repository.getItemsCount()
                     if (count > 0) {
                         // Se já possui itens salvos localmente, libera a tela de splash IMEDIATAMENTE (em menos de 2s)
-                        withContext(Dispatchers.Main) {
-                            onComplete()
-                        }
-                        // Sincroniza novos itens e prefetch de metadados em segundo plano sem travar a navegação
+                        notifyComplete()
+                        // Sincroniza novos itens em segundo plano sem travar a navegação
                         try {
                             repository.syncNewItemsOnStartup()
-                            repository.startBackgroundMetadataPrefetch()
                         } catch (e: Exception) {
                             Log.e("IPTVViewModel", "Erro na sincronização em segundo plano", e)
                         }
@@ -458,15 +454,12 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
                         } catch (e: Exception) {
                             Log.e("IPTVViewModel", "Erro no sync inicial", e)
                         }
-                        repository.startBackgroundMetadataPrefetch()
                     }
                 }
             } catch (e: Exception) {
                 Log.e("IPTVViewModel", "Erro na sincronização de inicialização", e)
             } finally {
-                withContext(Dispatchers.Main) {
-                    onComplete()
-                }
+                notifyComplete()
             }
         }
     }
@@ -479,9 +472,11 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
         bannerJob = viewModelScope.launch {
             while (isActive) {
                 delay(5000)
-                val totalBanners = if (customTotal > 0) customTotal else bannerItems.value.size
-                if (totalBanners > 0) {
-                    _bannerIndex.value = (_bannerIndex.value + 1) % totalBanners
+                if (_currentScreen.value is Screen.Main && _selectedTab.value == "Inicio") {
+                    val totalBanners = if (customTotal > 0) customTotal else bannerItems.value.size
+                    if (totalBanners > 0) {
+                        _bannerIndex.value = (_bannerIndex.value + 1) % totalBanners
+                    }
                 }
             }
         }
@@ -676,6 +671,9 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
 
     // Async TMDB details loading when selecting/viewing details of any film/series
     fun enrichItemOnDemand(item: PlaylistItem) {
+        if (enrichedItemCache.contains(item.id.toString())) {
+            return
+        }
         if (repository.isMetadataComplete(item)) return
         if (!attemptedEnrichments.add(item.id)) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -687,11 +685,55 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun extractEpisodeKey(title: String): String? {
+        val regex = Regex("S\\d{1,2}E\\d{1,2}", RegexOption.IGNORE_CASE)
+        val match = regex.find(title)
+        if (match != null) return match.value.uppercase()
+        if (title.contains(" - ")) {
+            val part = title.substringAfter(" - ").trim()
+            if (part.startsWith("Episódio", ignoreCase = true) || part.startsWith("Ep", ignoreCase = true)) {
+                return part.lowercase()
+            }
+        }
+        return null
+    }
+
+    fun saveWatchProgress(item: PlaylistItem, position: Long, duration: Long) {
+        val currentProf = _selectedProfile.value ?: return
+        viewModelScope.launch {
+            repository.saveWatchProgress(currentProf.id, item.id, position, duration)
+            val episodeKey = extractEpisodeKey(item.title)
+            if (episodeKey != null) {
+                repository.saveEpisodeWatchProgress(currentProf.id, item.id, episodeKey, position, duration)
+            }
+        }
+    }
+
     fun saveWatchProgress(itemId: Int, position: Long, duration: Long) {
         val currentProf = _selectedProfile.value ?: return
         viewModelScope.launch {
             repository.saveWatchProgress(currentProf.id, itemId, position, duration)
         }
+    }
+
+    suspend fun getWatchProgress(item: PlaylistItem): com.example.data.model.WatchHistory? {
+        val currentProf = _selectedProfile.value ?: return null
+        val episodeKey = extractEpisodeKey(item.title)
+        if (episodeKey != null) {
+            val epProg = repository.getEpisodeWatchProgress(currentProf.id, item.id, episodeKey)
+            return if (epProg != null) {
+                com.example.data.model.WatchHistory(
+                    profileId = currentProf.id,
+                    itemId = item.id,
+                    position = epProg.first,
+                    duration = epProg.second,
+                    lastWatched = System.currentTimeMillis()
+                )
+            } else {
+                null
+            }
+        }
+        return repository.getWatchProgress(currentProf.id, item.id)
     }
 
     suspend fun getWatchProgress(itemId: Int): com.example.data.model.WatchHistory? {
@@ -756,5 +798,37 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun verifyAndGetRealPlaylistItem(item: PlaylistItem): PlaylistItem? {
         return repository.verifyAndGetRealPlaylistItem(item)
+    }
+
+    private val _isCategoryLoading = MutableStateFlow(false)
+    val isCategoryLoading: StateFlow<Boolean> = _isCategoryLoading
+
+    private val _categoryLoadProgress = MutableStateFlow(0f)
+    val categoryLoadProgress: StateFlow<Float> = _categoryLoadProgress
+
+    private val enrichedItemCache = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    fun preloadCategoryItems(items: List<PlaylistItem>) {
+        viewModelScope.launch {
+            _isCategoryLoading.value = true
+            _categoryLoadProgress.value = 0f
+            val deferredItems = items.take(6).map { item ->
+                async {
+                    try {
+                        if (!enrichedItemCache.contains(item.id.toString())) {
+                            enrichItemOnDemand(item)
+                            enrichedItemCache.add(item.id.toString())
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+            deferredItems.forEachIndexed { index, deferred ->
+                deferred.await()
+                _categoryLoadProgress.value = (index + 1).toFloat() / deferredItems.size
+            }
+            _isCategoryLoading.value = false
+        }
     }
 }

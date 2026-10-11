@@ -1,9 +1,11 @@
 package com.example.data.model
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.io.Serializable
 
+@Immutable
 @Entity(tableName = "playlist_items")
 data class PlaylistItem(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,

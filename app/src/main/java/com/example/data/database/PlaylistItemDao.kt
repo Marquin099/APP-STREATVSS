@@ -144,6 +144,9 @@ interface PlaylistItemDao {
     @Update
     suspend fun updateItem(item: PlaylistItem)
 
+    @Update
+    suspend fun updateItems(items: List<PlaylistItem>)
+
     @Query("""
         SELECT * FROM playlist_items 
         WHERE type = :type AND groupName = :groupName 

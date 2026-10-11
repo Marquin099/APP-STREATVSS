@@ -240,6 +240,10 @@ class VlcPlayerManager(
     }
 
     var currentAudioTrack by mutableStateOf(-1)
+    fun getSelectedAudioTrack(): Int {
+        val active = mediaPlayer?.audioTrack ?: -1
+        return if (active != -1) active else currentAudioTrack
+    }
     fun setAudioTrack(id: Int) {
         currentAudioTrack = id
         mediaPlayer?.audioTrack = id
@@ -250,6 +254,10 @@ class VlcPlayerManager(
     }
 
     var currentSpuTrack by mutableStateOf(-1)
+    fun getSelectedSpuTrack(): Int {
+        val active = mediaPlayer?.spuTrack ?: -1
+        return if (active != -1) active else currentSpuTrack
+    }
     fun setSpuTrack(id: Int) {
         currentSpuTrack = id
         mediaPlayer?.spuTrack = id
