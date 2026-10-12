@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -27,7 +28,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -47,6 +51,8 @@ fun LoginScreen(
     var password by remember { mutableStateOf("") }
 
     val syncState by viewModel.syncState.collectAsState()
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     // Focus state trackers for styling high contrast glowing TV borders
     var userFocused by remember { mutableStateOf(false) }
@@ -175,6 +181,10 @@ fun LoginScreen(
                         ) 
                     },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(
+                        onNext = { passFocusRequester.requestFocus() }
+                    ),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color(0xFF1E2025),
                         unfocusedTextColor = Color(0xFF1E2025),
@@ -239,7 +249,16 @@ fun LoginScreen(
                     },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                            if (username.isNotEmpty() && password.isNotEmpty()) {
+                                viewModel.performLogin(serverUrl.trim(), username.trim(), password.trim())
+                            }
+                        }
+                    ),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color(0xFF1E2025),
                         unfocusedTextColor = Color(0xFF1E2025),
@@ -296,6 +315,8 @@ fun LoginScreen(
                 // Login Trigger Button - Styled as a beautiful, smaller centered white pill button with dpad focus and push animation
                 Button(
                     onClick = {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
                         if (username.isNotEmpty() && password.isNotEmpty()) {
                             viewModel.performLogin(serverUrl.trim(), username.trim(), password.trim())
                         }

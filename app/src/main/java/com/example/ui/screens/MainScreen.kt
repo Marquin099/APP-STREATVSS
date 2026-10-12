@@ -1246,12 +1246,11 @@ private fun CategoryListTabContent(
                     ?: emptyList()
             }
 
-            if (isLoading) {
-                MoviesSeriesSkeletonLoader(categoryTitle = activeCategory)
-            } else if (catItems.isNotEmpty()) {
+            if (catItems.isNotEmpty()) {
                 MoviesSeriesCategoryRow(
                     categoryTitle = activeCategory,
                     items = catItems,
+                    categoryIndex = focusedCategoryIndex,
                     onPlay = onItemPlayOrDetail,
                     onItemFocused = { item ->
                         onItemFocused(item)
@@ -1270,6 +1269,8 @@ private fun CategoryListTabContent(
                         }
                     }
                 )
+            } else if (isLoading) {
+                MoviesSeriesSkeletonLoader(categoryTitle = activeCategory)
             }
         } else {
             Column(
@@ -1429,6 +1430,8 @@ private fun TopNavBarTabs(
 ) {
     val tabs = remember { listOf("Inicio", "Canais", "Filmes", "Series", "Minha Lista") }
     val viewModel = LocalIPTVViewModel.current
+    val coroutineScope = rememberCoroutineScope()
+    var isNavigatingTabsWithArrows by remember { mutableStateOf(false) }
 
     // Armazena as coordenadas do container e de cada item para animar a pill vermelha
     var containerCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -1520,24 +1523,46 @@ private fun TopNavBarTabs(
                             else Color.Transparent
                         )
                         .onFocusChanged { focusState ->
-                            // ESTRELA DO COMPORTAMENTO NETFLIX:
-                            // Ao receber o foco das setas do controle remoto, seleciona a aba imediatamente (apenas se não estiver restaurando foco de um card clicado)
-                            if (focusState.isFocused && selectedTab != tab && viewModel?.lastClickedItemId == null) {
+                            // Ao receber o foco das setas do controle remoto (navegação horizontal), seleciona a aba
+                            if (focusState.isFocused && selectedTab != tab && isNavigatingTabsWithArrows && viewModel?.lastClickedItemId == null) {
                                 onTabSelected(tab)
                             }
                         }
                         .onPreviewKeyEvent { keyEvent ->
-                            // Navegação ao pressionar para baixo (muda para o conteúdo principal)
-                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
-                                try {
-                                    contentFocusRequester.requestFocus()
-                                    true
-                                } catch (e: Exception) {
-                                    false
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                when (keyEvent.key) {
+                                    Key.DirectionRight, Key.DirectionLeft -> {
+                                        isNavigatingTabsWithArrows = true
+                                        false
+                                    }
+                                    Key.DirectionDown -> {
+                                        isNavigatingTabsWithArrows = false
+                                        val success = try {
+                                            contentFocusRequester.requestFocus()
+                                            true
+                                        } catch (e: Exception) {
+                                            false
+                                        }
+                                        if (!success) {
+                                            coroutineScope.launch {
+                                                delay(50)
+                                                try {
+                                                    contentFocusRequester.requestFocus()
+                                                } catch (e: Exception) {
+                                                    // Transient focus request error ignored
+                                                }
+                                            }
+                                        }
+                                        true
+                                    }
+                                    else -> false
                                 }
                             } else false
                         }
-                        .clickable { onTabSelected(tab) }
+                        .clickable {
+                            isNavigatingTabsWithArrows = false
+                            onTabSelected(tab)
+                        }
                         .focusable()
                         .padding(horizontal = 18.dp, vertical = 8.dp)
                 ) {
@@ -1587,10 +1612,10 @@ private fun TopNavBarActions(
                     if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
                         try {
                             contentFocusRequester.requestFocus()
-                            true
                         } catch (e: Exception) {
-                            false
+                            // Transient focus request error ignored
                         }
+                        true
                     } else false
                 }
                 .focusable(),
@@ -1637,10 +1662,10 @@ private fun TopNavBarActions(
                         if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
                             try {
                                 contentFocusRequester.requestFocus()
-                                true
                             } catch (e: Exception) {
-                                false
+                                // Transient focus request error ignored
                             }
+                            true
                         } else false
                     }
                     .focusable(),
@@ -1707,10 +1732,10 @@ private fun TopNavBarActions(
                     if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
                         try {
                             contentFocusRequester.requestFocus()
-                            true
                         } catch (e: Exception) {
-                            false
+                            // Transient focus request error ignored
                         }
+                        true
                     } else false
                 }
                 .focusable(),
@@ -2804,6 +2829,7 @@ fun MoviesSeriesCategoryRow(
     onPlay: (PlaylistItem) -> Unit,
     onItemFocused: (PlaylistItem) -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
+    categoryIndex: Int = 0,
     onUpPressed: () -> Unit,
     onDownPressed: () -> Unit
 ) {
@@ -2839,6 +2865,26 @@ fun MoviesSeriesCategoryRow(
     val slot0FocusRequester = remember { FocusRequester() }
     val slot1FocusRequester = remember { FocusRequester() }
     var isRowInteracted by remember { mutableStateOf(false) }
+    var previousCategoryIndex by remember { mutableStateOf(categoryIndex) }
+
+    // When navigating down or up between categories, automatically focus the first card in the new category
+    LaunchedEffect(categoryIndex) {
+        if (categoryIndex != previousCategoryIndex) {
+            previousCategoryIndex = categoryIndex
+            focusedItemIndex = 0
+            isRowInteracted = true
+            delay(50)
+            try {
+                slot0FocusRequester.requestFocus()
+            } catch (e: Exception) {
+                try {
+                    firstItemFocusRequester?.requestFocus()
+                } catch (e2: Exception) {
+                    e2.printStackTrace()
+                }
+            }
+        }
+    }
 
     // Restore focus to last clicked item on back navigation
     LaunchedEffect(categoryTitle, items) {
@@ -2918,7 +2964,7 @@ fun MoviesSeriesCategoryRow(
                             cardWidth = cardWidth,
                             cardHeight = cardHeight,
                             focusRequester = cardRequester,
-                            firstItemFocusRequester = if (relativeIdx == 0 && pageStartIndex == 0) firstItemFocusRequester else null,
+                            firstItemFocusRequester = if (relativeIdx == 0) firstItemFocusRequester else null,
                             onClick = { onPlay(item) },
                             onFocusGained = {
                                 isRowInteracted = true
@@ -3059,6 +3105,7 @@ fun MovieSeriesCardItem(
                 else Modifier
             )
             .focusRequester(focusRequester)
+            .focusable()
             .onFocusChanged {
                 if (it.isFocused) {
                     onFocusGained()

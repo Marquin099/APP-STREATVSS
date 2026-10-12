@@ -671,14 +671,32 @@ class IPTVViewModel(application: Application) : AndroidViewModel(application) {
 
     // Async TMDB details loading when selecting/viewing details of any film/series
     fun enrichItemOnDemand(item: PlaylistItem) {
-        if (enrichedItemCache.contains(item.id.toString())) {
-            return
+        val cleanTitle = repository.cleanTitleForSearch(item.title)
+        val isSeries = item.type == "series" || item.groupName.contains("Série", ignoreCase = true) || item.groupName.contains("Serie", ignoreCase = true)
+        val overrideId = repository.getOverrideTmdbId(item, cleanTitle, isSeries)
+        val needsOverrideFix = overrideId != null && item.tmdbId != overrideId.toString()
+
+        if (!needsOverrideFix) {
+            if (enrichedItemCache.contains(item.id.toString())) {
+                return
+            }
+            if (repository.isMetadataComplete(item)) return
+            if (!attemptedEnrichments.add(item.id)) return
         }
-        if (repository.isMetadataComplete(item)) return
-        if (!attemptedEnrichments.add(item.id)) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                repository.enrichItemWithTMDB(item)
+                val itemToEnrich = if (needsOverrideFix) {
+                    item.copy(
+                        tmdbId = overrideId?.toString(),
+                        metadataLoaded = false,
+                        posterUrl = null,
+                        backdropUrl = null,
+                        clearLogoUrl = null,
+                        titleLogoUrl = null
+                    )
+                } else item
+                repository.enrichItemWithTMDB(itemToEnrich)
+                enrichedItemCache.add(item.id.toString())
             } catch (e: Exception) {
                 Log.e("IPTVViewModel", "Failed to enrich item ${item.title}", e)
             }

@@ -493,11 +493,11 @@ class IPTVRepository(private val context: Context) {
                 newItems.chunked(500).forEach { chunk ->
                     playlistDao.insertItems(chunk)
                 }
-                CoroutineScope(Dispatchers.IO).launch {
-                    startBackgroundMetadataPrefetch()
-                }
             } else {
                 Log.d("IPTVRepository", "syncNewItemsOnStartup: No new items found on the server.")
+            }
+            CoroutineScope(Dispatchers.IO).launch {
+                startBackgroundMetadataPrefetch()
             }
 
             true
@@ -1025,7 +1025,7 @@ class IPTVRepository(private val context: Context) {
         return line.substring(valueStart, endIdx)
     }
 
-    private fun cleanTitleForSearch(title: String): String {
+    fun cleanTitleForSearch(title: String): String {
         var clean = title.replace(searchPatternsCombined, "")
         clean = clean.replace(spacesRegex, " ").trim()
         clean = clean.replace(dashEndRegex, "").trim()
@@ -1034,14 +1034,103 @@ class IPTVRepository(private val context: Context) {
         return if (clean.isEmpty()) title else clean
     }
 
-    private fun getOverrideTmdbId(item: PlaylistItem, cleanTitle: String, isSeries: Boolean): Int? {
-        return getOverrideTmdbId(item.title, cleanTitle, isSeries, item.groupName, item.id)
+    fun extractYearFromItem(item: PlaylistItem): Int? {
+        val yearPattern = Regex("""\b(19\d\d|20\d\d)\b""")
+        // 1. Check item.year field
+        if (!item.year.isNullOrBlank()) {
+            val m = yearPattern.find(item.year!!)
+            if (m != null) return m.value.toIntOrNull()
+        }
+        // 2. Check title
+        val mTitle = yearPattern.find(item.title)
+        if (mTitle != null) return mTitle.value.toIntOrNull()
+
+        // 3. Check groupName / category
+        val mGroup = yearPattern.find(item.groupName)
+        if (mGroup != null) return mGroup.value.toIntOrNull()
+
+        return null
     }
 
-    private fun getOverrideTmdbId(title: String, cleanTitle: String, isSeries: Boolean, groupName: String = "", itemId: Int = 0): Int? {
+    private fun pickBestTmdbSearchResult(results: JSONArray, targetYear: Int?, isSeries: Boolean): JSONObject? {
+        if (results.length() == 0) return null
+        if (targetYear != null) {
+            val dateField = if (isSeries) "first_air_date" else "release_date"
+            for (i in 0 until results.length()) {
+                val candidate = results.optJSONObject(i) ?: continue
+                val dateStr = candidate.optString(dateField, "")
+                if (dateStr.startsWith(targetYear.toString())) {
+                    return candidate
+                }
+            }
+        }
+        return results.optJSONObject(0)
+    }
+
+    fun getOverrideTmdbId(item: PlaylistItem, cleanTitle: String, isSeries: Boolean): Int? {
+        val effectiveIsSeries = isSeries ||
+                item.type == "series" ||
+                item.type == "series_episode" ||
+                item.groupName.contains("Série", ignoreCase = true) ||
+                item.groupName.contains("Serie", ignoreCase = true) ||
+                item.url.contains("/series/")
+        return getOverrideTmdbId(item.title, cleanTitle, effectiveIsSeries, item.groupName, item.id, item.year)
+    }
+
+    fun getOverrideTmdbId(title: String, cleanTitle: String, isSeries: Boolean, groupName: String = "", itemId: Int = 0, year: String? = null): Int? {
         val lowerClean = cleanTitle.lowercase().trim()
         val lowerTitle = title.lowercase().trim()
         val lowerGroup = groupName.lowercase().trim()
+        val effectiveYear = year?.trim() ?: ""
+
+        // 1. "Um Mundo Diferente" (2026 - ID TMDB 305357)
+        // O usuário tem a série de 2026 "Um mundo diferente" cadastrada no painel com TMDB ID 305357-a-different-world
+        val isUmMundoDiferente = lowerClean == "um mundo diferente" ||
+                lowerClean == "a different world" ||
+                lowerClean.contains("305357") ||
+                lowerTitle.contains("305357") ||
+                lowerClean == "305357-a-different-world" ||
+                lowerClean.startsWith("um mundo diferente") ||
+                lowerTitle == "um mundo diferente" ||
+                lowerTitle.startsWith("um mundo diferente") ||
+                lowerTitle.contains("um mundo diferente") ||
+                (lowerTitle.contains("mundo diferente") && !lowerTitle.contains("outro mundo")) ||
+                (lowerClean.contains("mundo diferente") && !lowerClean.contains("outro mundo"))
+        if (isUmMundoDiferente) {
+            return 305357 // Um Mundo Diferente (2026)
+        }
+
+        // 2. "Colisão" / "Colisao" (2026 - ID TMDB 331033)
+        // O usuário tem a série de 2026 "Colisao" cadastrada no painel com TMDB ID 331033-colision
+        val isColisaoName = lowerClean == "colisao" ||
+                lowerClean == "colisão" ||
+                lowerClean == "colision" ||
+                lowerClean == "collision" ||
+                lowerClean == "331033-colision" ||
+                lowerTitle.contains("331033") ||
+                lowerClean.contains("331033") ||
+                lowerTitle == "colisao" ||
+                lowerTitle == "colisão" ||
+                lowerTitle == "colision" ||
+                lowerTitle.startsWith("colisao ") ||
+                lowerTitle.startsWith("colisão ") ||
+                lowerTitle.startsWith("colisao -") ||
+                lowerTitle.startsWith("colisão -") ||
+                lowerTitle.startsWith("colisao:") ||
+                lowerTitle.startsWith("colisão:") ||
+                lowerClean.startsWith("colisao ") ||
+                lowerClean.startsWith("colisão ") ||
+                lowerClean.startsWith("colisao") ||
+                lowerClean.startsWith("colisão")
+        if (isColisaoName) {
+            if (isSeries || lowerGroup.contains("serie") || lowerGroup.contains("série") ||
+                lowerGroup.contains("2026") || lowerTitle.contains("2026") || effectiveYear.contains("2026") ||
+                lowerClean.contains("colision") || lowerTitle.contains("colision") ||
+                !lowerGroup.contains("filme")
+            ) {
+                return 331033 // Colisão (2026)
+            }
+        }
 
         if (!isSeries) {
             // Filmes:
@@ -1235,6 +1324,20 @@ class IPTVRepository(private val context: Context) {
             return false
         }
 
+        // Se for a série Um Mundo Diferente e estiver com o ID antigo (115) ao invés do de 2026 (305357)
+        if ((cleanTitle.contains("mundo diferente", ignoreCase = true) || item.title.contains("mundo diferente", ignoreCase = true)) &&
+            item.tmdbId != "305357"
+        ) {
+            return false
+        }
+
+        // Se for a série Colisão e estiver com ID antigo (como 83584, 8344 ou 244891) ao invés do de 2026 (331033)
+        if ((cleanTitle.contains("colis", ignoreCase = true) || item.title.contains("colis", ignoreCase = true)) &&
+            item.tmdbId != "331033" && (isSeries || item.groupName.contains("serie", ignoreCase = true))
+        ) {
+            return false
+        }
+
         return item.metadataLoaded || (
                 !item.posterUrl.isNullOrBlank() &&
                         !item.backdropUrl.isNullOrBlank() &&
@@ -1256,7 +1359,11 @@ class IPTVRepository(private val context: Context) {
         }
 
         tmdbSemaphore.withPermit {
-            val tmdbApiKey = BuildConfig.TMDB_API_KEY.ifEmpty { "355b405bb005248e382a8b400ebab70b" }
+            val tmdbApiKey = if (BuildConfig.TMDB_API_KEY.isBlank() || BuildConfig.TMDB_API_KEY == "your_tmdb_api_key_here") {
+                "355b405bb005248e382a8b400ebab70b"
+            } else {
+                BuildConfig.TMDB_API_KEY
+            }
             try {
                 val searchType = if (isSeries) "tv" else "movie"
 
@@ -1266,25 +1373,38 @@ class IPTVRepository(private val context: Context) {
                 if (overrideId != null && overrideId > 0) {
                     foundId = overrideId
                 } else {
+                    val targetYear = extractYearFromItem(item)
                     val queries = listOf(cleanTitle, item.title)
                     for (q in queries) {
                         if (q.isBlank()) continue
-                        val url = "https://api.themoviedb.org/3/search/$searchType?api_key=$tmdbApiKey&query=${java.net.URLEncoder.encode(q, "UTF-8")}&language=pt-BR"
-                        val request = Request.Builder().url(url).build()
-                        try {
-                            client.newCall(request).execute().use { response ->
-                                if (response.isSuccessful) {
-                                    val jsonStr = response.body?.string() ?: ""
-                                    val root = JSONObject(jsonStr)
-                                    val results = root.optJSONArray("results")
-                                    if (results != null && results.length() > 0) {
-                                        firstResult = results.getJSONObject(0)
-                                        foundId = firstResult!!.optInt("id")
+                        val searchUrls = mutableListOf<String>()
+                        if (targetYear != null) {
+                            val yearParam = if (isSeries) "first_air_date_year" else "primary_release_year"
+                            searchUrls.add("https://api.themoviedb.org/3/search/$searchType?api_key=$tmdbApiKey&query=${java.net.URLEncoder.encode(q, "UTF-8")}&$yearParam=$targetYear&language=pt-BR")
+                        }
+                        searchUrls.add("https://api.themoviedb.org/3/search/$searchType?api_key=$tmdbApiKey&query=${java.net.URLEncoder.encode(q, "UTF-8")}&language=pt-BR")
+
+                        for (url in searchUrls) {
+                            val request = Request.Builder().url(url).build()
+                            try {
+                                client.newCall(request).execute().use { response ->
+                                    if (response.isSuccessful) {
+                                        val jsonStr = response.body?.string() ?: ""
+                                        val root = JSONObject(jsonStr)
+                                        val results = root.optJSONArray("results")
+                                        if (results != null && results.length() > 0) {
+                                            val chosen = pickBestTmdbSearchResult(results, targetYear, isSeries)
+                                            if (chosen != null) {
+                                                firstResult = chosen
+                                                foundId = chosen.optInt("id")
+                                            }
+                                        }
                                     }
                                 }
+                            } catch (e: Exception) {
+                                Log.e("IPTVRepository", "TMDB search failed for $q", e)
                             }
-                        } catch (e: Exception) {
-                            Log.e("IPTVRepository", "TMDB search failed for $q", e)
+                            if (foundId > 0) break
                         }
                         if (foundId > 0) break
                     }
@@ -1379,10 +1499,15 @@ class IPTVRepository(private val context: Context) {
                         } catch (e: Exception) {}
                     }
 
+                    val hasWrongTmdbId = overrideId != null && item.tmdbId != null && item.tmdbId != overrideId.toString()
+                    val fallbackPoster = if (hasWrongTmdbId) null else (item.posterUrl ?: item.logoUrl)
+                    val fallbackBackdrop = if (hasWrongTmdbId) null else item.backdropUrl
+                    val fallbackLogo = if (hasWrongTmdbId) null else (item.clearLogoUrl ?: item.titleLogoUrl ?: item.logo)
+
                     val year = if (dateStr.length >= 4) dateStr.substring(0, 4) else ""
-                    val pUrl = getTmdbImageUrl(posterPath, "w500") ?: item.posterUrl ?: item.logoUrl
-                    val bUrl = getTmdbImageUrl(backdropPath, "w1280") ?: item.backdropUrl
-                    val cLogo = getTmdbImageUrl(clearLogoUrl, "w500") ?: item.clearLogoUrl ?: item.titleLogoUrl ?: item.logo
+                    val pUrl = getTmdbImageUrl(posterPath, "w500") ?: fallbackPoster ?: item.logoUrl
+                    val bUrl = getTmdbImageUrl(backdropPath, "w1280") ?: fallbackBackdrop
+                    val cLogo = getTmdbImageUrl(clearLogoUrl, "w500") ?: fallbackLogo
 
                     val enriched = item.copy(
                         posterUrl = pUrl,
@@ -1867,19 +1992,32 @@ class IPTVRepository(private val context: Context) {
         if (tmdbId <= 0 || tmdbId >= 9900) {
             val mediaType = if (isSeries) "tv" else "movie"
             try {
+                val targetYear = extractYearFromItem(item)
                 val encodedQuery = java.net.URLEncoder.encode(cleanTitle, "UTF-8")
-                val searchUrl = "https://api.themoviedb.org/3/search/$mediaType?api_key=$tmdbApiKey&query=$encodedQuery&language=pt-BR"
-                val request = Request.Builder().url(searchUrl).build()
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val body = response.body?.string()
-                        if (!body.isNullOrEmpty()) {
-                            val results = JSONObject(body).optJSONArray("results")
-                            if (results != null && results.length() > 0) {
-                                tmdbId = results.getJSONObject(0).optInt("id", 0)
+                val searchUrls = mutableListOf<String>()
+                if (targetYear != null) {
+                    val yearParam = if (isSeries) "first_air_date_year" else "primary_release_year"
+                    searchUrls.add("https://api.themoviedb.org/3/search/$mediaType?api_key=$tmdbApiKey&query=$encodedQuery&$yearParam=$targetYear&language=pt-BR")
+                }
+                searchUrls.add("https://api.themoviedb.org/3/search/$mediaType?api_key=$tmdbApiKey&query=$encodedQuery&language=pt-BR")
+
+                for (searchUrl in searchUrls) {
+                    val request = Request.Builder().url(searchUrl).build()
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val body = response.body?.string()
+                            if (!body.isNullOrEmpty()) {
+                                val results = JSONObject(body).optJSONArray("results")
+                                if (results != null && results.length() > 0) {
+                                    val chosen = pickBestTmdbSearchResult(results, targetYear, isSeries)
+                                    if (chosen != null) {
+                                        tmdbId = chosen.optInt("id", 0)
+                                    }
+                                }
                             }
                         }
                     }
+                    if (tmdbId > 0) break
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -2254,7 +2392,7 @@ class IPTVRepository(private val context: Context) {
     suspend fun getRealCastFromTMDB(item: PlaylistItem): List<CastMember> = withContext(Dispatchers.IO) {
         val tmdbApiKey = "355b405bb005248e382a8b400ebab70b"
         val cleanTitle = cleanTitleForSearch(item.title)
-        val isSeries = item.type == "series"
+        val isSeries = item.type == "series" || item.groupName.contains("Série", ignoreCase = true) || item.groupName.contains("Serie", ignoreCase = true)
         val searchType = if (isSeries) "tv" else "movie"
 
         try {
@@ -2262,18 +2400,30 @@ class IPTVRepository(private val context: Context) {
             var tmdbId = overrideId ?: item.tmdbId?.toIntOrNull() ?: 0
 
             if (tmdbId == 0) {
-                // Search TMDB to find the ID
-                val searchUrl = "https://api.themoviedb.org/3/search/$searchType?api_key=$tmdbApiKey&query=${java.net.URLEncoder.encode(cleanTitle, "UTF-8")}&language=pt-BR"
-                val searchRequest = Request.Builder().url(searchUrl).build()
-                client.newCall(searchRequest).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val body = response.body?.string() ?: ""
-                        val results = JSONObject(body).optJSONArray("results")
-                        if (results != null && results.length() > 0) {
-                            val firstResult = results.getJSONObject(0)
-                            tmdbId = firstResult.optInt("id")
+                val targetYear = extractYearFromItem(item)
+                val encodedQuery = java.net.URLEncoder.encode(cleanTitle, "UTF-8")
+                val searchUrls = mutableListOf<String>()
+                if (targetYear != null) {
+                    val yearParam = if (isSeries) "first_air_date_year" else "primary_release_year"
+                    searchUrls.add("https://api.themoviedb.org/3/search/$searchType?api_key=$tmdbApiKey&query=$encodedQuery&$yearParam=$targetYear&language=pt-BR")
+                }
+                searchUrls.add("https://api.themoviedb.org/3/search/$searchType?api_key=$tmdbApiKey&query=$encodedQuery&language=pt-BR")
+
+                for (searchUrl in searchUrls) {
+                    val searchRequest = Request.Builder().url(searchUrl).build()
+                    client.newCall(searchRequest).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val body = response.body?.string() ?: ""
+                            val results = JSONObject(body).optJSONArray("results")
+                            if (results != null && results.length() > 0) {
+                                val chosen = pickBestTmdbSearchResult(results, targetYear, isSeries)
+                                if (chosen != null) {
+                                    tmdbId = chosen.optInt("id")
+                                }
+                            }
                         }
                     }
+                    if (tmdbId > 0) break
                 }
             }
 
@@ -2350,18 +2500,29 @@ class IPTVRepository(private val context: Context) {
             var tmdbId = overrideId ?: item.tmdbId?.toIntOrNull() ?: 0
 
             if (tmdbId == 0) {
-                // Search TMDB to find the ID
-                val searchUrl = "https://api.themoviedb.org/3/search/tv?api_key=$tmdbApiKey&query=${java.net.URLEncoder.encode(cleanTitle, "UTF-8")}&language=pt-BR"
-                val searchRequest = Request.Builder().url(searchUrl).build()
-                client.newCall(searchRequest).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val body = response.body?.string() ?: ""
-                        val results = JSONObject(body).optJSONArray("results")
-                        if (results != null && results.length() > 0) {
-                            val firstResult = results.getJSONObject(0)
-                            tmdbId = firstResult.optInt("id")
+                val targetYear = extractYearFromItem(item)
+                val encodedQuery = java.net.URLEncoder.encode(cleanTitle, "UTF-8")
+                val searchUrls = mutableListOf<String>()
+                if (targetYear != null) {
+                    searchUrls.add("https://api.themoviedb.org/3/search/tv?api_key=$tmdbApiKey&query=$encodedQuery&first_air_date_year=$targetYear&language=pt-BR")
+                }
+                searchUrls.add("https://api.themoviedb.org/3/search/tv?api_key=$tmdbApiKey&query=$encodedQuery&language=pt-BR")
+
+                for (searchUrl in searchUrls) {
+                    val searchRequest = Request.Builder().url(searchUrl).build()
+                    client.newCall(searchRequest).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val body = response.body?.string() ?: ""
+                            val results = JSONObject(body).optJSONArray("results")
+                            if (results != null && results.length() > 0) {
+                                val chosen = pickBestTmdbSearchResult(results, targetYear, true)
+                                if (chosen != null) {
+                                    tmdbId = chosen.optInt("id")
+                                }
+                            }
                         }
                     }
+                    if (tmdbId > 0) break
                 }
             }
 
@@ -2756,12 +2917,14 @@ class IPTVRepository(private val context: Context) {
         Log.d("IPTVRepository", "Starting intelligent parallel background metadata prefetch...")
 
         try {
-            // Phase 0: Override items & collision fixes ("Fúria", "Doc", Céu de Fúria)
+            // Phase 0: Override items & collision fixes ("Fúria", "Doc", Céu de Fúria, "Um mundo diferente", "Colisão")
             try {
                 val furiaItems = playlistDao.getItemsByTitleQuery("%furia%") + playlistDao.getItemsByTitleQuery("%fúria%")
                 val docItems = playlistDao.getItemsByTitleQuery("%doc%")
                 val ruaItems = playlistDao.getItemsByTitleQuery("%fim da rua%") + playlistDao.getItemsByTitleQuery("%oak street%")
-                val candidates = (furiaItems + docItems + ruaItems).distinctBy { it.id }
+                val mundoItems = playlistDao.getItemsByTitleQuery("%mundo diferente%") + playlistDao.getItemsByTitleQuery("%different world%")
+                val colisaoItems = playlistDao.getItemsByTitleQuery("%colis%") + playlistDao.getItemsByTitleQuery("%collision%")
+                val candidates = (furiaItems + docItems + ruaItems + mundoItems + colisaoItems).distinctBy { it.id }
 
                 val itemsToUpdate = mutableListOf<PlaylistItem>()
                 for (candidate in candidates) {
@@ -2772,17 +2935,19 @@ class IPTVRepository(private val context: Context) {
                     val hasWrongSeriesId = !isSeries && (candidate.tmdbId == "292533" || candidate.tmdbId == "287238")
                     val hasWrongDocId = isSeries && candidate.groupName.contains("netflix", ignoreCase = true) && candidate.tmdbId == "255055"
                     val hasWrongOverride = overrideId != null && candidate.tmdbId != overrideId.toString()
+                    val hasWrongMundoId = (cleanTitle.contains("mundo diferente", ignoreCase = true) || candidate.title.contains("mundo diferente", ignoreCase = true)) && candidate.tmdbId != "305357"
+                    val hasWrongColisaoId = (cleanTitle.contains("colis", ignoreCase = true) || candidate.title.contains("colis", ignoreCase = true)) && candidate.tmdbId != "331033" && (isSeries || candidate.groupName.contains("serie", ignoreCase = true))
                     val hasEnglishOakLogo = candidate.clearLogoUrl?.contains("8VDfGY16827yyWH0R8itxLtfgK1") == true ||
                             candidate.titleLogoUrl?.contains("8VDfGY16827yyWH0R8itxLtfgK1") == true
 
-                    if (hasWrongSeriesId || hasWrongDocId || hasWrongOverride || hasEnglishOakLogo || !candidate.metadataLoaded) {
+                    if (hasWrongSeriesId || hasWrongDocId || hasWrongOverride || hasWrongMundoId || hasWrongColisaoId || hasEnglishOakLogo || !candidate.metadataLoaded) {
                         val itemToEnrich = candidate.copy(
                             tmdbId = overrideId?.toString() ?: if (hasWrongSeriesId) null else candidate.tmdbId,
                             metadataLoaded = false,
-                            posterUrl = if (hasWrongSeriesId) null else candidate.posterUrl,
-                            backdropUrl = if (hasWrongSeriesId) null else candidate.backdropUrl,
-                            clearLogoUrl = if (hasWrongSeriesId || hasEnglishOakLogo) null else candidate.clearLogoUrl,
-                            titleLogoUrl = if (hasWrongSeriesId || hasEnglishOakLogo) null else candidate.titleLogoUrl
+                            posterUrl = if (hasWrongSeriesId || hasWrongOverride || hasWrongMundoId || hasWrongColisaoId) null else candidate.posterUrl,
+                            backdropUrl = if (hasWrongSeriesId || hasWrongOverride || hasWrongMundoId || hasWrongColisaoId) null else candidate.backdropUrl,
+                            clearLogoUrl = if (hasWrongSeriesId || hasEnglishOakLogo || hasWrongOverride || hasWrongMundoId || hasWrongColisaoId) null else candidate.clearLogoUrl,
+                            titleLogoUrl = if (hasWrongSeriesId || hasEnglishOakLogo || hasWrongOverride || hasWrongMundoId || hasWrongColisaoId) null else candidate.titleLogoUrl
                         )
                         try {
                             val enriched = enrichItemWithTMDB(itemToEnrich, updateDb = false)

@@ -58,6 +58,8 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalFocusManager
 
 val profileFallbackBackgroundItems = listOf(
     PlaylistItem(
@@ -163,6 +165,8 @@ fun ProfileSelectionScreen(
     val popularItems by viewModel.popularItems.collectAsState()
     val movies by viewModel.movies.collectAsState()
     val series by viewModel.series.collectAsState()
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     val backgroundItems = remember(trendingItems, popularItems, movies, series) {
         val serverItems = (trendingItems + popularItems + movies.take(30) + series.take(30))
@@ -344,6 +348,7 @@ fun ProfileSelectionScreen(
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                     keyboardActions = KeyboardActions(
                                         onDone = {
+                                            keyboardController?.hide()
                                             if (isSaveEnabled) {
                                                 saveButtonFocusRequester.requestFocus()
                                             }
@@ -369,6 +374,8 @@ fun ProfileSelectionScreen(
 
                                     Button(
                                         onClick = {
+                                            keyboardController?.hide()
+                                            focusManager.clearFocus()
                                             if (isSaveEnabled) {
                                                 viewModel.addNewProfile(newProfileName.trim(), selectedAvatarUrl)
                                                 isInCreateMode = false
@@ -419,6 +426,8 @@ fun ProfileSelectionScreen(
 
                                     OutlinedButton(
                                         onClick = {
+                                            keyboardController?.hide()
+                                            focusManager.clearFocus()
                                             isInCreateMode = false
                                             newProfileName = ""
                                             selectedAvatarUrl = ""
@@ -859,6 +868,8 @@ fun ProfileSelectionScreen(
 
                                 OutlinedButton(
                                     onClick = {
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
                                         isInCreateMode = false
                                         newProfileName = ""
                                         selectedAvatarUrl = ""
@@ -905,6 +916,8 @@ fun ProfileSelectionScreen(
 
                                 Button(
                                     onClick = {
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
                                         if (isSaveEnabled) {
                                             viewModel.addNewProfile(newProfileName.trim(), selectedAvatarUrl)
                                             isInCreateMode = false
